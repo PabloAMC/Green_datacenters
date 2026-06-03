@@ -1,0 +1,11 @@
+# Off-grid Datacenter LCOE Model — runtime dependencies.
+# Pinned floors reflect the versions the model is verified against (June 2026):
+#   numpy 2.4.6, scipy 1.17.1, matplotlib 3.10.9 (Python 3.10+).
+# Install with:  pip install -r requirements.txt
+numpy>=1.26
+scipy>=1.11
+matplotlib>=3.7
+
+# Optional — nicer plot styling. The code falls back to a plain matplotlib
+# style automatically if this is not installed, so it is not required to run.
+# scienceplots>=2.1

@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editor / OS / tooling
+.DS_Store
+.idea/
+.vscode/
+.claude/
+
+# Note: figs/, output/, and scratch/ ARE tracked on purpose — the README and
+# model_documentation.md reference the generated figures and scratch/v53_run.log.
