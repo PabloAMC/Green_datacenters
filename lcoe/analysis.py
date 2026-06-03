@@ -7,10 +7,9 @@ from typing import Dict
 
 import numpy as np
 
-from .params import (REGIONS, RESOURCE_PRESETS, LDES_PRESETS, FIRM,
+from .params import (REGIONS, RESOURCE_PRESETS, LDES_PRESETS, GAS_H2, FIRM,
                      WorkloadProfile, _sys_with)
-from .costs import (cumulative_capacity, wright_law, ldes_annual_cost,
-                    gas_backup_cost_scalar)
+from .costs import cumulative_capacity, wright_law, crf
 from .weather import solar_clearsky
 from .dispatch import dispatch_ldes_overlay
 from .simulate import run_simulation
@@ -220,32 +219,36 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
                      ldes_tech="h2", ldes_hours=None,
                      years=15, grid_steps=15, n_mc=20, seed=42):
     """
-    Does cheap long-duration storage profitably displace the residual gas at high RE?
+    Self-produced green H₂ vs buying it: how much of a high-RE datacenter's firming can
+    it make for itself from RE overcapacity, and is that cheaper than purchasing H₂?
 
-    Solves the standard model (no LDES) for the optimal LFP + overbuild build, then —
-    holding that build fixed — runs a 2-storage chronological dispatch (LFP diurnal +
-    LDES multi-day, the LDES charged from otherwise-curtailed surplus) over a range of
-    LDES energy capacities, and reports delivered LCOE for each. LDES competes with the
-    gas backup for the multi-day firming job. Opt-in & reduced fidelity.
+    Assumption (per design choice): **the firming turbine always has fuel** — it burns
+    self-produced H₂ when the store has it and **purchased green H₂ (market) otherwise**.
+    So there are *no blackouts*; the rare deep lulls that would drain the store become a
+    *cost* (occasional expensive market H₂), not a reliability failure. Everything here
+    is **zero-carbon** (green H₂ either way) — this is a fully-firm, gas-free datacenter.
 
-    This is a GREEDY overlay: the LFP/overbuild build is taken from the no-LDES optimum,
-    so the LDES benefit shown is a conservative lower bound (joint co-optimisation would
-    trim overbuild and add more LDES). Charge (electrolyser) and discharge (turbine)
-    power are separate, taken from the LDES preset. Returns a dict.
+    Method: solve the standard model (no LDES) for the optimal LFP+overbuild build, then
+    — holding it fixed — run the 2-storage chronological dispatch (LFP diurnal +
+    self-produced-H₂ multi-day, charged from otherwise-curtailed surplus) over an
+    electrolyser-power × storage grid. Cost = generation + LFP (fixed) + a firming
+    turbine (always) + electrolyser + H₂ storage + **purchased green H₂** for the
+    residual the store could not cover. Greedy overlay (LFP/overbuild fixed → the
+    self-production benefit is a conservative lower bound); reduced fidelity.
     """
     cfg = REGIONS[region_key]
     sys = _sys_with(cfg["sys"], grid_steps=grid_steps, n_mc_weather=n_mc)
     ldes = LDES_PRESETS[ldes_tech]
-    # Sweep electrolyser (charge) power × storage energy. The turbine (discharge) is
-    # always full-size (1.0) so it can firm the load; the question is how big an
-    # electrolyser + store drive the residual (= would-be-blackout if gas-free) → 0.
+    # Electrolyser-power × storage-energy grid. Turbine (discharge) is always full-size
+    # (1.0) so the load is always firmed (self-produced or purchased H₂). charge=0 is
+    # the buy-all-H₂ baseline (a turbine + market H₂, no self-production).
     charge_set = [0.3, 0.5, 0.75, 1.0]
     storage_set = [48.0, 168.0, 336.0] if ldes_hours is None else list(ldes_hours)
     dis_pow = 1.0
     n = sys.project_lifetime_yr
 
     print(f"\n[LDES overlay] {cfg['label']} | {re_target:.0%} RE | {ldes.name} | "
-          f"{target_year} — solving no-LDES build, then 2-storage overlay …")
+          f"{target_year} — solving no-LDES build, then self-produced-vs-bought H₂ …")
     res = run_simulation(
         solar=cfg["solar"], wind=cfg["wind"], battery=cfg["battery"], gas=cfg["gas"],
         smr=cfg["smr"], sys=sys, workload=FIRM, mean_irr=cfg["mean_irr"],
@@ -256,11 +259,9 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
     C_sol, C_win, B_lfp = sc["opt_csol"][i], sc["opt_cwin"][i], sc["opt_B"][i]
     gen_cost, lfp_cost = float(sc["opt_cg"][i]), float(sc["opt_cs"][i])  # fixed build
 
-    batt = cfg["battery"]; gas = cfg["gas"]
-    # Learning (conservative, IRENA/IEA): only the ELECTROLYSER (charge kit) is taken
-    # to learn; the H2 turbine (mature) and the storage vessels are held flat. The LDES
-    # preset's learning_rate/trajectory are tuned to a realistic ~30–35% electrolyser
-    # decline by 2035, not an aggressive collapse.
+    batt = cfg["battery"]
+    # Learning (conservative, IRENA/IEA): only the ELECTROLYSER learns; the H2 turbine
+    # (mature) and the storage vessels are held flat.
     cum_ldes = cumulative_capacity(ldes, years)
     ch_capex = float(wright_law(ldes.capex_kw_today, ldes.cumulative_gwh_2025,
                                 cum_ldes, ldes.learning_rate)[i])      # electrolyser
@@ -268,6 +269,10 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
     dis_capex = (ldes.discharge_capex_kw if ldes.discharge_capex_kw is not None
                  else ldes.capex_kw_today)                             # turbine (flat)
     lfp_pow = 1.0 if B_lfp <= 4.0 else min(1.0, 4.0 / B_lfp)
+    # Purchased green H₂ through the turbine: ZERO carbon, Lazard LCOH v4.0 (~$5.25/kg
+    # ≈ $46/MMBtu) × CCGT-class H₂-turbine heat rate (consistent with the ~0.54 turbine
+    # leg of the 0.35 round-trip). $/MWh-electric served from market H₂.
+    h2_buy_var = GAS_H2.gas_price_mmbtu * GAS_H2.ccgt_heat_rate + GAS_H2.vom_mwh
 
     wkw = dict(wind_solar_corr=sys.wind_solar_corr, syn_loading=sys.syn_loading,
                syn_persistence=sys.syn_persistence, cloud_ar1=sys.cloud_ar1,
@@ -276,59 +281,64 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
     clearsky = solar_clearsky(cfg["mean_irr"])
     rng = np.random.default_rng(seed + 7)
 
-    # Candidate (charge_pow, storage_h) grid + a no-LDES baseline (B=0).
     cand = [(0.0, 0.0)] + [(c, s) for c in charge_set for s in storage_set]
     ch_arr = np.array([c for c, _ in cand], dtype=float)
     B_arr = np.array([s for _, s in cand], dtype=float)
-    gas_frac, gas_peak, _lfp_efc, ldes_efc = dispatch_ldes_overlay(
+    # `resid` = share of load the store could not cover → served by PURCHASED H₂.
+    resid, _peak, _lfp_efc, ldes_efc = dispatch_ldes_overlay(
         clearsky, cfg["mean_wind_ms"], rng, wkw, C_sol, C_win, B_lfp,
         lfp_pow, batt.roundtrip_efficiency, B_arr, ch_arr, dis_pow,
         ldes.roundtrip_efficiency, n_mc)
 
+    crf_l = crf(ldes.wacc, n)
+    annuity = (1.0 - (1.0 + ldes.wacc) ** (-n)) / ldes.wacc
+
+    def cfg_cost(c, B, efc):
+        # turbine is always installed (firms the load); electrolyser + storage scale
+        # with the self-production design. Augmentation applies to the storage energy.
+        p_cap = (c * ch_capex + dis_pow * dis_capex) * 1e3      # electrolyser + turbine
+        e_cap = B * e_capex * 1e3                               # H2 storage
+        cost_one = p_cap + e_cap
+        deg = ldes.calendar_deg_per_yr + ldes.cycle_deg_per_fec * efc * 365
+        npv = cost_one + deg * e_cap * annuity
+        return (npv * crf_l + cost_one * ldes.om_frac_capex) / 8760.0
+
     rows = []
     for k, (c, s) in enumerate(cand):
-        ldes_cost = 0.0 if s <= 0 else ldes_annual_cost(
-            ldes, s, e_capex, ch_capex, dis_capex, c, dis_pow, ldes.wacc, n,
-            float(ldes_efc[k])) / 8760.0
-        gas_cost = gas_backup_cost_scalar(
-            float(gas_frac[k]), gas, i, gas.wacc,
-            gas_peak=float(np.clip(gas_peak[k], 0.05, 1.0)))
-        rows.append({"charge": c, "h": s, "gas_frac": float(gas_frac[k]),
-                     "ldes_cost": ldes_cost, "gas_cost": gas_cost,
-                     "total": gen_cost + lfp_cost + ldes_cost + gas_cost})
-    base = rows[0]
+        cap_cost = cfg_cost(c, s, float(ldes_efc[k]))
+        buy_cost = float(resid[k]) * h2_buy_var          # purchased green H2 (0 carbon)
+        rows.append({"charge": c, "h": s, "buy_frac": float(resid[k]),
+                     "cap_cost": cap_cost, "buy_cost": buy_cost,
+                     "total": gen_cost + lfp_cost + cap_cost + buy_cost})
+    base = rows[0]                                        # buy ALL firming H2
     best = min(rows, key=lambda r: r["total"])
-    # smallest config (by total cost) that gets the residual under 1% of load
-    firm_rows = [r for r in rows if r["h"] > 0 and r["gas_frac"] < 0.01]
-    near_firm = min(firm_rows, key=lambda r: r["total"]) if firm_rows else None
 
     print(f"  Fixed build: {C_sol:.1f}× solar + {C_win:.1f}× wind + {B_lfp:.0f}h LFP "
-          f"(no-LDES optimum). Storage {e_capex:.0f} $/kWh (flat), electrolyser "
-          f"{ch_capex:.0f} $/kW (learned from {ldes.capex_kw_today:.0f}), turbine "
-          f"{dis_capex:.0f} $/kW; RTE {ldes.roundtrip_efficiency:.0%}.")
-    print(f"  Residual gas % (= would-be unserved if gas-free)  |  delivered $/MWh")
-    hdr = f"    {'elec\\\\stor':>10}" + "".join(f"{int(s):>6}h" for s in storage_set)
+          f"(no-LDES optimum). Storage {e_capex:.0f} $/kWh, electrolyser {ch_capex:.0f} "
+          f"$/kW (learned from {ldes.capex_kw_today:.0f}), turbine {dis_capex:.0f} $/kW, "
+          f"RTE {ldes.roundtrip_efficiency:.0%}. Market H₂ {h2_buy_var:.0f} $/MWh-e "
+          f"(Lazard, zero-carbon). No blackouts — all firming is green H₂.")
+    print(f"  Share of load firmed by PURCHASED H₂ (rest self-produced)  |  $/MWh delivered")
+    hdr = f"    {'elec/stor':>10}" + "".join(f"{int(s):>7}h" for s in storage_set)
     print(hdr); print("    " + "─" * (len(hdr) - 4))
-    print(f"    {'no LDES':>10}  gas {base['gas_frac']*100:4.1f}%  →  ${base['total']:.0f}/MWh")
+    print(f"    {'buy all':>10}  {base['buy_frac']*100:4.1f}% → ${base['total']:.0f}/MWh")
     for c in charge_set:
         cells = ""
         for s in storage_set:
             r = next(x for x in rows if x["charge"] == c and x["h"] == s)
-            cells += f"{r['gas_frac']*100:4.1f}%/{r['total']:4.0f}"
-        print(f"    {c:>9.2f}MW {cells}")
-    print(f"  → Lowest cost: elec {best['charge']:.2f}MW + {best['h']:.0f}h → "
-          f"${best['total']:.0f}/MWh, gas {best['gas_frac']*100:.1f}% "
-          f"(vs no-LDES ${base['total']:.0f}/MWh @ {base['gas_frac']*100:.1f}% gas).")
-    if near_firm:
-        print(f"  → Near gas-free (<1% residual): elec {near_firm['charge']:.2f}MW + "
-              f"{near_firm['h']:.0f}h → ${near_firm['total']:.0f}/MWh "
-              f"(+${near_firm['total']-base['total']:.0f} for the last ~"
-              f"{base['gas_frac']*100:.0f}% of firming).")
+            cells += f"{r['buy_frac']*100:4.1f}%/{r['total']:4.0f}"
+        print(f"    {c:>8.2f}MW {cells}")
+    print(f"  → Cheapest: elec {best['charge']:.2f}MW + {best['h']:.0f}h store → "
+          f"${best['total']:.0f}/MWh (buy {best['buy_frac']*100:.1f}% of firming), "
+          f"vs ${base['total']:.0f}/MWh buying all H₂ ({base['buy_frac']*100:.1f}%).")
+    if best["charge"] <= 0:
+        print("  → Self-production does NOT pay here: buying all green H₂ is cheaper "
+              "than electrolyser + storage capex (but both are zero-carbon).")
     else:
-        print("  → No swept config drives the residual below 1%: a bigger electrolyser "
-              "/ store (or higher discharge power) is needed for a gas-free system.")
+        print(f"  → Self-producing saves ${base['total']-best['total']:.0f}/MWh vs "
+              f"buying all H₂, by trading market fuel for electrolyser+storage capex.")
     print("  (Greedy overlay: LFP/overbuild fixed from the no-LDES optimum; only the "
-          "electrolyser is assumed to learn; reduced fidelity. cells = gas%/$tot.)\n")
+          "electrolyser learns; reduced fidelity. cells = bought-H₂%/$tot.)\n")
     return {"region": cfg["label"], "re_target": re_target, "target_year": target_year,
             "ldes_tech": ldes.name, "build": (C_sol, C_win, B_lfp), "rows": rows,
-            "base": base, "best": best, "near_firm": near_firm}
+            "base": base, "best": best, "h2_buy_var": h2_buy_var}

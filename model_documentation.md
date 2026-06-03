@@ -629,14 +629,21 @@ This is normalised so $p(0) = p_0$ exactly. The EU default parameters ($p_0 = \$
 
 ### 7.5 Long-duration storage & self-produced-H₂ firming (opt-in overlay, `--ldes`)
 
-Can self-produced long-duration storage firm a high-RE off-grid datacenter — and how
-big must the electrolyser/store be? The `--ldes` overlay answers this with a genuine
-**2-storage chronological dispatch**: at the no-LDES optimal build, LFP keeps doing the
-diurnal cycle while an LDES charges from otherwise-curtailed surplus and discharges
-through multi-day Dunkelflaute. It **sweeps electrolyser (charge) power × storage energy**
-and reports the *residual gas* — i.e. the would-be-unserved (blackout) fraction if the
-system were gas-free — and delivered LCOE for each. (Greedy overlay — LFP/overbuild fixed
-from the no-LDES optimum; conservative lower bound; reduced fidelity.)
+Can a high-RE datacenter **make its own H₂** from overcapacity instead of burning gas —
+and is that cheaper than **buying** green H₂? The `--ldes` overlay answers this with a
+genuine **2-storage chronological dispatch**: at the no-LDES optimal build, LFP keeps the
+diurnal cycle while self-produced H₂ charges from otherwise-curtailed surplus and discharges
+through multi-day Dunkelflaute.
+
+**Tail handling — no blackouts, by assumption.** The firming turbine *always* has fuel: it
+burns self-produced H₂ when the store has it and **purchased green H₂ (market) otherwise**.
+So the rare deep lull that drains the store is a **cost** (occasional expensive market H₂),
+not a loss-of-load event — which is why no reliability/LOLE machinery is needed. Everything
+is **zero-carbon** (green H₂ either way): a fully firm, gas-free datacenter. The overlay
+sweeps electrolyser power × storage energy and reports the **share of load firmed by
+*purchased* H₂** (the rest self-produced) and the delivered LCOE. (Greedy overlay —
+LFP/overbuild fixed from the no-LDES optimum → the self-production benefit is a conservative
+lower bound; reduced fidelity.)
 
 **Technologies** (`LDES_PRESETS`). Storage and the (mature) H₂ turbine are held flat;
 only the electrolyser is assumed to learn, **conservatively** (~15%/doubling, IRENA *Green
@@ -649,21 +656,25 @@ an aggressive collapse):
 | Self-produced H₂ — **tanks** (default) | 20 (flat) | 1,200→~760 | 1,300 | 35% | DOE/NREL bulk compressed H₂; Lazard LCOH v4.0 |
 | Self-produced H₂ — salt cavern (*speculative*) | 0.6 | 1,200→~760 | 1,300 | 35% | Lazard LCOH v4.0 ($20/kg ÷ 33.3 kWh/kg) |
 
-The H₂ case is "make H₂ from overcapacity": an electrolyser fills storage from surplus, a
-full-size H₂ turbine firms the load. **Salt caverns are *not* assumed** (most sites have
-none) — above-ground **tanks** are the default. Green-H₂ *purchased* fuel (`--firming h2`,
-§7.2) is the buy-don't-make alternative (~$5.25/kg, ≈$46/MMBtu).
+**Salt caverns are *not* assumed** (most sites have none) — above-ground **tanks** are the
+default; the cavern preset is kept only to bound the optimistic end (labelled speculative).
+Purchased green H₂ (for the residual, and as the buy-everything baseline) is priced from
+Lazard LCOH v4.0: ~$5.25/kg ≈ $46/MMBtu, ×CCGT-class turbine heat rate ≈ **$302/MWh-e**,
+zero-carbon.
 
-**Finding (EU 90% RE, 2035, tanks, greedy overlay).** A *small* electrolyser leaves the
-residual stuck (~4% of load — it can't refill the store between lulls), but **scaling the
-electrolyser up firms the system**: ~0.75–1.0 MW/MW-load electrolyser + ~2–7 days of tank
-storage drives the residual (would-be-blackout) to **≈0%** — a fully gas-free, zero-carbon
-RE+H₂ datacenter. The cost of that last ~10% of firming is **≈ +$25/MWh** (≈$156 vs $131
-with a cheap gas backup), i.e. self-produced H₂ **can** eliminate the gas (and its carbon)
-but **does not beat cheap gas on pure $/MWh**. The binding constraint is *power*
-(electrolyser size), not energy — bigger electrolyser ⇒ less storage needed. Salt caverns
-(if available) cut the storage cost but barely move this, since storage isn't the binding
-term once the electrolyser is sized for reliability.
+**Finding (EU 90% RE, 2035, tanks, greedy overlay).** Buying *all* firming as green H₂
+(turbine + market H₂, no self-production) costs **≈$155/MWh** with ~10% of load served from
+the market. **Self-producing most of it is modestly cheaper**: a ~0.5–0.75 MW/MW-load
+electrolyser + ~2 days of tank storage cuts the bought share to ~0.6–1% and lands at
+**≈$150/MWh** (≈ −$5/MWh) — trading market fuel for electrolyser+storage capex. Driving the
+bought share to *exactly* 0 (true self-sufficiency, ~1 MW electrolyser + ~1 week store)
+costs **more** (~$190/MWh) than just buying the last sliver, so the economic optimum
+**buys the rare deep-lull energy rather than over-building to eliminate it**. The binding
+lever is electrolyser power (a small one can't refill between lulls); storage energy and
+cavern-vs-tank matter less once the electrolyser is sized. Net: a **fully gas-free,
+zero-carbon, firm** EU datacenter is feasible at ~$150/MWh in 2035, self-producing ~99% of
+its H₂ and buying the rest — modestly cheaper than buying all H₂, and the deep tail is
+handled by the market, not by blackouts or by weeks of storage.
 
 ---
 
