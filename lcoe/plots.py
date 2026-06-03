@@ -176,6 +176,9 @@ def plot_h2_breakdown(results, region="US"):
                         alpha=0.85, hatch=hatch, edgecolor="white", linewidth=0.3)
         bottom = bottom + vals
     ax.plot(yrs, h["lcoe"], color="black", lw=1.5, ls="--", label="Total (optimised)")
+    if "gas_pure" in results:
+        ax.plot(yrs, results["gas_pure"], color=C_GAS, lw=2, ls="--",
+                label=f"{results.get('gas_name', 'Gas CCGT')} (pure, ref)")
     ax.set(xlabel="Year", ylabel="Delivered cost ($/MWh)",
            title=f"Optimised gas-free green-H₂ system — {region}",
            xlim=(yrs[0], yrs[-1]), ylim=(0, None))

@@ -398,7 +398,9 @@ def run_ldes_joint(region_key="eu", target_year=2035, ldes_tech="h2",
     CF_sol = float(sol2d.mean()); CF_win = float(win2d.mean())
 
     lo = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
-    hi = np.array([24.0, 22.0, 24.0, 1.5, 720.0])   # C_sol, C_win, B_lfp, elec, H2-store
+    # elec ceiling 4.0: the unconstrained optimum reaches ~1.7 MW/MW-load by 2040 and would
+    # bind at the old 1.5; headroom removes the artefact (kept in sync with h2system._HI).
+    hi = np.array([24.0, 22.0, 24.0, 4.0, 720.0])   # C_sol, C_win, B_lfp, elec, H2-store
 
     def evaluate(x, mult):
         C_sol, C_win, B_lfp, elec, H2 = [float(np.clip(x[j], lo[j], hi[j])) for j in range(5)]

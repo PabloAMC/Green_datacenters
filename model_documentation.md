@@ -709,9 +709,21 @@ the *shape* and *direction* as robust, the absolute as indicative.)
 optimum (`h2_system_trajectory`, reusing the same `dispatch_h2_vec` + cost model, B_lfp
 fixed at 6h, warm-started) as the **"Optimised gas-free H₂ system" line in fig1** and its
 capex/opex **breakdown in fig6** (generation / LFP / electrolyser / H₂ storage / turbine /
-purchased-H₂ — all zero-carbon). The line lands below the high-RE-with-gas curves in both
-regions: a fully-optimised gas-free build is *cheaper* than the constrained 90%-RE-with-gas
-case, because it is free to choose a solar-heavy, big-electrolyser mix.
+purchased-H₂ — all zero-carbon), with the **pure-gas reference** overlaid on fig6 so the
+zero-carbon system can be read directly against the gas it displaces. The line lands below
+the high-RE-with-gas curves in both regions: a fully-optimised gas-free build is *cheaper*
+than the constrained 90%-RE-with-gas case, because it is free to choose a solar-heavy,
+big-electrolyser mix. EU trajectory: **$158/MWh (2025) → $88 (2040)**, crossing below pure
+gas around 2030–31 as EU carbon climbs.
+
+*Robustness (verified).* Fixing B_lfp at 6h is benign — letting `run_ldes_joint` choose it
+freely lands at 5.5h (2025) → 6.0h (2040), within 0.5h across the trajectory, and the
+fixed-6h per-year optimum reproduces the free 5D joint optimum to <$1/MWh per year. The
+electrolyser box ceiling is **4.0 MW/MW-load** (raised from 1.5, kept in sync between
+`h2system._HI` and `run_ldes_joint`): the unconstrained optimum rises to ~1.7 MW/MW-load by
+2040 and would otherwise bind at 1.5 in the late years; the headroom removes that artefact
+at negligible cost (2040 LCOE 88.0→87.7). All other design variables (overbuild, H₂ store)
+sit interior to their bounds throughout.
 
 ---
 

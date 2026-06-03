@@ -11,7 +11,10 @@ model** as `run_ldes_joint.evaluate` (kept in sync — see the comment in `_cost
 solves one optimum per year (warm-started) so we can draw the optimised gas-free H₂
 line in fig1 and its capex/opex breakdown in fig6. No RE target — the system is green by
 construction, so it is a pure delivered-LCOE minimisation. LFP duration is fixed at the
-robustly-optimal ~6 h (both this and run_ldes_joint land there), dropping a dimension.
+robustly-optimal ~6 h: letting run_ldes_joint choose it freely lands at 5.5 h (2025) →
+6.0 h (2040), i.e. within 0.5 h of 6 h across the whole trajectory, so fixing it drops a
+dimension at negligible cost (verified: the fixed-6 h trajectory reproduces the free 5D
+joint optimum to within ~0.4× overbuild and <$1/MWh per year).
 """
 import numpy as np
 from scipy.optimize import minimize
@@ -24,7 +27,10 @@ from .dispatch import dispatch_h2_vec
 
 _B_LFP = 6.0                                   # fixed diurnal optimum (matches run_ldes_joint)
 _LO = np.array([0.0, 0.0, 0.0, 0.0])           # C_sol, C_win, electrolyser MW, H2-store h
-_HI = np.array([24.0, 22.0, 1.5, 720.0])
+# Electrolyser ceiling 4.0 (vs run_ldes_joint's 1.5): the unconstrained per-year optimum
+# rises to ~1.7 MW/MW-load by 2040 and would bind at 1.5 in the late years, so we give it
+# headroom. Effect is tiny (2040 LCOE 88.0→87.7) but it removes an artificial boundary.
+_HI = np.array([24.0, 22.0, 4.0, 720.0])
 COMP = ["gen_capex", "gen_om", "lfp_capex", "lfp_om", "elec_capex",
         "store_capex", "turbine_capex", "buy_h2"]
 
