@@ -203,3 +203,89 @@ class ChronologicalSimulator:
         )
 
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TWO-STORAGE OVERLAY  (LFP diurnal + LDES multi-day)  — for run_ldes_overlay
+# ─────────────────────────────────────────────────────────────────────────────
+
+def dispatch_ldes_overlay(clearsky, mean_wind, rng, weather_kwargs,
+                          C_sol, C_win, B_lfp, lfp_pow, lfp_rte,
+                          B_ldes, ldes_charge_pow, ldes_discharge_pow, ldes_rte, n_mc):
+    """
+    Chronological 2-storage dispatch at a FIXED build, vectorised over a vector of
+    candidate LDES energy capacities `B_ldes` (hours, MWh per MW-load).
+
+    Priority each hour — deficit: LFP discharge → LDES discharge → gas; surplus:
+    LFP charge → LDES charge → curtail. So LFP keeps doing the cheap diurnal cycle
+    and LDES soaks up the multi-day surplus (otherwise curtailed) to cover multi-day
+    deficits. The LFP trajectory is independent of LDES (LDES acts only on the LFP
+    residual), so it is computed once (scalar) and shared across all candidates.
+
+    LDES charge and discharge power are **separate** (`ldes_charge_pow`,
+    `ldes_discharge_pow`): the self-produced-H2 case has a *small electrolyser*
+    charging slowly from surplus over many sunny hours, plus a *full-size turbine*
+    to cover the load during lulls — exactly the "make H2 on sunny days" design.
+
+    Returns (per-candidate, mean over MC years):
+        gas_frac[K]   residual deficit served by gas backup (fraction of load)
+        gas_peak[K]   mean annual peak residual (for gas-capacity sizing)
+        lfp_efc       LFP throughput equivalent-full-cycles/day (scalar)
+        ldes_efc[K]   LDES throughput equivalent-full-cycles/day
+    """
+    K = len(B_ldes)
+    B_ldes = np.asarray(B_ldes, dtype=float)
+    eta_l = lfp_rte ** 0.5      # LFP charge/discharge (symmetric split)
+    eta_d = ldes_rte ** 0.5     # LDES charge/discharge (symmetric split of RTE)
+    gas_acc = np.zeros(K); peak_acc = np.zeros(K); ldes_dis_acc = np.zeros(K)
+    lfp_dis_acc = 0.0
+    soc_ldes_max = B_ldes       # MWh per MW-load
+
+    for _ in range(int(n_mc)):
+        sol, win = generate_weather_year(clearsky, mean_wind, rng, **weather_kwargs)
+        soc_lfp = 0.0
+        soc_ld = np.zeros(K)
+        gas = np.zeros(K); peak = np.zeros(K); ldes_dis = np.zeros(K)
+        lfp_dis = 0.0
+        for t in range(8760):
+            g = C_sol * sol[t] + C_win * win[t]
+            net = g - 1.0
+            if net < 0.0:
+                deficit = -net
+                # 1. LFP discharge (scalar, shared)
+                d_lfp = min(min(soc_lfp * eta_l, lfp_pow), deficit)
+                soc_lfp -= d_lfp / eta_l
+                lfp_dis += d_lfp
+                resid = deficit - d_lfp                       # scalar residual
+                # 2. LDES discharge (per candidate), limited by turbine power
+                d_ld = np.minimum(np.minimum(soc_ld * eta_d, ldes_discharge_pow), resid)
+                soc_ld -= d_ld / eta_d
+                ldes_dis += d_ld
+                resid_k = resid - d_ld                        # length-K
+                peak = np.maximum(peak, resid_k)
+                gas += resid_k
+            else:
+                surplus = net
+                # 3. LFP charge (scalar)
+                c_lfp = min(min((B_lfp - soc_lfp) / eta_l, lfp_pow), surplus)
+                soc_lfp += c_lfp * eta_l
+                resid_s = surplus - c_lfp                     # scalar surplus left
+                # 4. LDES charge (per candidate), limited by electrolyser power;
+                #    remainder curtailed.
+                c_ld = np.minimum(np.minimum((soc_ldes_max - soc_ld) / eta_d,
+                                             ldes_charge_pow), resid_s)
+                soc_ld += c_ld * eta_d
+        gas_acc += gas / 8760.0
+        peak_acc += peak
+        ldes_dis_acc += ldes_dis
+        lfp_dis_acc += lfp_dis
+
+    gas_frac = gas_acc / n_mc
+    gas_peak = peak_acc / n_mc
+    lfp_efc = (lfp_dis_acc / eta_l / max(B_lfp, 1e-9)) / 365.0 / n_mc if B_lfp > 0 else 0.0
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ldes_efc = np.where(soc_ldes_max > 0,
+                            (ldes_dis_acc / eta_d)
+                            / np.where(soc_ldes_max > 0, soc_ldes_max, 1.0) / 365.0 / n_mc,
+                            0.0)
+    return gas_frac, gas_peak, lfp_efc, ldes_efc

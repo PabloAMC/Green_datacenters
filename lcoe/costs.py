@@ -131,20 +131,23 @@ def battery_annualised_cost(
     r: float,
     n_yr: int,
     effective_fec_per_day: float = 0.5,
+    power_rating: float = None,
 ) -> float:
     """
     Annualised battery cost per MW of load including capacity augmentation.
 
     effective_fec_per_day: throughput equivalent-full-cycles/day from dispatch.
+    power_rating: MW per MW-load (override). None → LFP default min(1, 4/B);
+    set explicitly for technologies (e.g. LDES) whose power is decoupled from energy.
     Thin wrapper over `battery_cost_split` (single source of the cost formula).
     """
     capex, opex = battery_cost_split(batt, storage_hours, capex_kwh, capex_kw,
-                                     r, n_yr, effective_fec_per_day)
+                                     r, n_yr, effective_fec_per_day, power_rating)
     return capex + opex
 
 
 def battery_cost_split(batt, storage_hours, capex_kwh, capex_kw, r, n_yr,
-                       effective_fec_per_day=0.5):
+                       effective_fec_per_day=0.5, power_rating=None):
     """
     (capex, opex) split of the annualised battery cost. The single source of the
     battery cost formula — `battery_annualised_cost` returns the sum of the two.
@@ -157,12 +160,16 @@ def battery_cost_split(batt, storage_hours, capex_kwh, capex_kw, r, n_yr,
     component is built once (inverter mid-life replacement is folded into O&M).
     Augmentation is priced at today's capex (future cells are cheaper, so this is
     conservative).
+
+    `power_rating` (MW per MW-load): None → LFP default min(1, 4/B); pass an explicit
+    value for power/energy-decoupled technologies such as LDES.
     """
     if storage_hours <= 0:
         return 0.0, 0.0
     fec_per_yr     = effective_fec_per_day * 365
     total_deg_rate = batt.calendar_deg_per_yr + batt.cycle_deg_per_fec * fec_per_yr
-    power_rating = 1.0 if storage_hours <= 4.0 else min(1.0, 4.0 / storage_hours)
+    if power_rating is None:
+        power_rating = 1.0 if storage_hours <= 4.0 else min(1.0, 4.0 / storage_hours)
     energy_capex = storage_hours * capex_kwh * 1e3     # cells — degrade, augmented
     power_capex  = power_rating * capex_kw * 1e3       # inverter/BOS — built once
     cost_one = energy_capex + power_capex
@@ -170,6 +177,27 @@ def battery_cost_split(batt, storage_hours, capex_kwh, capex_kw, r, n_yr,
     annuity = (1.0 - (1.0 + r) ** (-n_yr)) / r if r > 0 else float(n_yr)
     npv = cost_one + total_deg_rate * energy_capex * annuity
     return npv * crf(r, n_yr), cost_one * batt.om_frac_capex
+
+
+def ldes_annual_cost(ldes, storage_hours, capex_kwh, charge_capex_kw,
+                     discharge_capex_kw, charge_pow, discharge_pow, r, n_yr,
+                     effective_fec_per_day=0.0):
+    """
+    Annualised LDES cost ($/MW-load/yr) with power/energy fully decoupled and the
+    charge kit (e.g. electrolyser) priced separately from the discharge kit (e.g. H2
+    turbine). Energy capex is per kWh of stored (mid-cycle) capacity; the energy
+    component is augmented yearly to offset fade (as for LFP, §6). Used by the
+    `--ldes` overlay; not part of the core 3D optimisation.
+    """
+    if storage_hours <= 0:
+        return 0.0
+    energy_capex = storage_hours * capex_kwh * 1e3
+    power_capex = charge_pow * charge_capex_kw * 1e3 + discharge_pow * discharge_capex_kw * 1e3
+    cost_one = energy_capex + power_capex
+    deg = ldes.calendar_deg_per_yr + ldes.cycle_deg_per_fec * effective_fec_per_day * 365
+    annuity = (1.0 - (1.0 + r) ** (-n_yr)) / r if r > 0 else float(n_yr)
+    npv = cost_one + deg * energy_capex * annuity
+    return npv * crf(r, n_yr) + cost_one * ldes.om_frac_capex
 
 
 # ─────────────────────────────────────────────────────────────────────────────

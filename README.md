@@ -64,6 +64,12 @@ python datacenter_lcoe.py --tornado --region eu --re 0.9
 
 # Green-hydrogen firming instead of natural gas (zero combustion carbon, pricey fuel)
 python datacenter_lcoe.py --region eu --re 0.9 --firming h2
+
+# Long-duration storage overlay: can iron-air or self-produced H2 (made from RE
+# overcapacity) displace the residual gas?  Tanks (default), salt cavern, or iron-air.
+python datacenter_lcoe.py --ldes h2 --region eu --re 0.9          # self-produced H2, tanks
+python datacenter_lcoe.py --ldes h2-cavern --region eu --re 0.9   # + salt-cavern storage
+python datacenter_lcoe.py --ldes iron-air --region eu --re 0.9
 ```
 Workload presets (`--workload`): `firm` (always-on, 0% shed) · `enterprise` (5% / $2500) · `training` (40% / $900) · `interruptible` (60% / $150) · `best-effort` (90% / $40). `--interruptible` = *fraction of load you may shed*; `--shed-penalty` = *value of the lost compute, $/MWh* (high = firm; the model only sheds when this is below the gas variable cost). Advanced: `--grid-steps`, `--mc`, `--years`, `--seed`.
 

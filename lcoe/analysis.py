@@ -7,7 +7,12 @@ from typing import Dict
 
 import numpy as np
 
-from .params import REGIONS, RESOURCE_PRESETS, FIRM, WorkloadProfile, _sys_with
+from .params import (REGIONS, RESOURCE_PRESETS, LDES_PRESETS, FIRM,
+                     WorkloadProfile, _sys_with)
+from .costs import (cumulative_capacity, wright_law, ldes_annual_cost,
+                    gas_backup_cost_scalar)
+from .weather import solar_clearsky
+from .dispatch import dispatch_ldes_overlay
 from .simulate import run_simulation
 
 
@@ -209,3 +214,97 @@ def run_tornado(region_key="eu", re_target=0.90, target_year=2030, years=15,
             "target_year": target_year, "base": base_gap, "rows": rows}
 
 
+
+
+def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
+                     ldes_tech="h2", ldes_hours=None,
+                     years=15, grid_steps=15, n_mc=20, seed=42):
+    """
+    Does cheap long-duration storage profitably displace the residual gas at high RE?
+
+    Solves the standard model (no LDES) for the optimal LFP + overbuild build, then —
+    holding that build fixed — runs a 2-storage chronological dispatch (LFP diurnal +
+    LDES multi-day, the LDES charged from otherwise-curtailed surplus) over a range of
+    LDES energy capacities, and reports delivered LCOE for each. LDES competes with the
+    gas backup for the multi-day firming job. Opt-in & reduced fidelity.
+
+    This is a GREEDY overlay: the LFP/overbuild build is taken from the no-LDES optimum,
+    so the LDES benefit shown is a conservative lower bound (joint co-optimisation would
+    trim overbuild and add more LDES). Charge (electrolyser) and discharge (turbine)
+    power are separate, taken from the LDES preset. Returns a dict.
+    """
+    cfg = REGIONS[region_key]
+    sys = _sys_with(cfg["sys"], grid_steps=grid_steps, n_mc_weather=n_mc)
+    ldes = LDES_PRESETS[ldes_tech]
+    if ldes_hours is None:
+        ldes_hours = [0, 24, 96, 168, 336, 720]      # 0 h … 1 month of storage
+    n = sys.project_lifetime_yr
+    ch_pow, dis_pow = ldes.charge_power_mw, ldes.discharge_power_mw
+    dis_capex_kw0 = ldes.discharge_capex_kw if ldes.discharge_capex_kw is not None \
+        else ldes.capex_kw_today
+
+    print(f"\n[LDES overlay] {cfg['label']} | {re_target:.0%} RE | {ldes.name} | "
+          f"{target_year} — solving no-LDES build, then 2-storage overlay …")
+    res = run_simulation(
+        solar=cfg["solar"], wind=cfg["wind"], battery=cfg["battery"], gas=cfg["gas"],
+        smr=cfg["smr"], sys=sys, workload=FIRM, mean_irr=cfg["mean_irr"],
+        mean_wind_ms=cfg["mean_wind_ms"], years=years, reliabilities=[re_target],
+        n_cost_mc=10, seed=seed)
+    yrs = res["years"]; i = int(target_year - yrs[0])
+    sc = res["scenarios"][re_target]
+    C_sol, C_win, B_lfp = sc["opt_csol"][i], sc["opt_cwin"][i], sc["opt_B"][i]
+    gen_cost, lfp_cost = float(sc["opt_cg"][i]), float(sc["opt_cs"][i])  # fixed build
+
+    batt = cfg["battery"]; gas = cfg["gas"]
+    cum_ldes = cumulative_capacity(ldes, years)
+    def _learn(c0):   # LDES capex at the target year via its own learning curve
+        return float(wright_law(c0, ldes.cumulative_gwh_2025, cum_ldes, ldes.learning_rate)[i])
+    e_capex, ch_capex, dis_capex = _learn(ldes.capex_kwh_today), _learn(ldes.capex_kw_today), _learn(dis_capex_kw0)
+    lfp_pow = 1.0 if B_lfp <= 4.0 else min(1.0, 4.0 / B_lfp)
+
+    wkw = dict(wind_solar_corr=sys.wind_solar_corr, syn_loading=sys.syn_loading,
+               syn_persistence=sys.syn_persistence, cloud_ar1=sys.cloud_ar1,
+               wind_ar1=sys.wind_ar1, wind_daily_share=sys.wind_daily_share,
+               wind_seasonal_amp=sys.wind_seasonal_amp)
+    clearsky = solar_clearsky(cfg["mean_irr"])
+    rng = np.random.default_rng(seed + 7)
+    B_arr = np.array(ldes_hours, dtype=float)
+    gas_frac, gas_peak, _lfp_efc, ldes_efc = dispatch_ldes_overlay(
+        clearsky, cfg["mean_wind_ms"], rng, wkw, C_sol, C_win, B_lfp,
+        lfp_pow, batt.roundtrip_efficiency, B_arr, ch_pow, dis_pow,
+        ldes.roundtrip_efficiency, n_mc)
+
+    rows = []
+    for k, h in enumerate(ldes_hours):
+        ldes_cost = 0.0 if h <= 0 else ldes_annual_cost(
+            ldes, h, e_capex, ch_capex, dis_capex, ch_pow, dis_pow, ldes.wacc, n,
+            float(ldes_efc[k])) / 8760.0
+        gas_cost = gas_backup_cost_scalar(
+            float(gas_frac[k]), gas, i, gas.wacc,
+            gas_peak=float(np.clip(gas_peak[k], 0.05, 1.0)))
+        rows.append({"h": h, "gas_frac": float(gas_frac[k]), "ldes_cost": ldes_cost,
+                     "gas_cost": gas_cost, "total": gen_cost + lfp_cost + ldes_cost + gas_cost})
+    base = rows[0]["total"]
+    best = min(rows, key=lambda r: r["total"])
+
+    print(f"  Fixed build: {C_sol:.1f}× solar + {C_win:.1f}× wind + {B_lfp:.0f}h LFP "
+          f"(no-LDES optimum). LDES capex: {e_capex:.1f} $/kWh energy, "
+          f"{ch_capex:.0f} $/kW charge ({ch_pow:.2f} MW), {dis_capex:.0f} $/kW "
+          f"discharge ({dis_pow:.2f} MW); RTE {ldes.roundtrip_efficiency:.0%}.")
+    print(f"    {'LDES h':>7}{'gas%':>7}{'LDES$':>8}{'gas$':>8}{'total$':>9}{'Δ no-LDES':>11}")
+    print("    " + "─" * 50)
+    for r in rows:
+        print(f"    {r['h']:>7.0f}{r['gas_frac']*100:>6.1f}%{r['ldes_cost']:>8.1f}"
+              f"{r['gas_cost']:>8.1f}{r['total']:>9.1f}{r['total']-base:>+11.1f}")
+    if best["h"] <= 0:
+        print(f"  → LDES does NOT lower cost here: the gas backup stays cheaper "
+              f"(best = no LDES, ${base:.1f}/MWh).")
+    else:
+        print(f"  → Best: {best['h']:.0f}h LDES → ${best['total']:.1f}/MWh "
+              f"({best['total']-base:+.1f} vs no-LDES); gas {rows[0]['gas_frac']*100:.1f}% "
+              f"→ {best['gas_frac']*100:.1f}% of load.")
+    print("  (Greedy overlay: LFP/overbuild fixed from the no-LDES optimum → conservative "
+          "lower bound on LDES value; reduced fidelity.)\n")
+    return {"region": cfg["label"], "re_target": re_target, "target_year": target_year,
+            "ldes_tech": ldes.name, "build": (C_sol, C_win, B_lfp), "rows": rows,
+            "base_total": base, "best": best}

@@ -65,6 +65,11 @@ class BatteryParams:
     replace_threshold: float   = 0.80
     uncertainty_sigma: float = 0.12
     wacc: float = 0.07   # cost of capital (mid: more risk than RE, less than gas)
+    # LDES-only fields (ignored for LFP / the core 3D path). Allow power/energy to be
+    # decoupled and charge (e.g. electrolyser) to differ from discharge (e.g. turbine).
+    discharge_capex_kw: float = None   # $/kW discharge kit; None → same as capex_kw
+    charge_power_mw: float = 1.0       # charge power, MW per MW-load (e.g. electrolyser)
+    discharge_power_mw: float = 1.0    # discharge power, MW per MW-load (e.g. turbine)
 
 
 @dataclass
@@ -260,22 +265,77 @@ GAS_EU = GasParams(
     carbon_trajectory_steepness=0.35,
 )
 
-# Green-hydrogen firming (opt-in alternative to gas, via --firming h2). Purchased
-# green H2 burned in an H2-capable turbine: **zero combustion carbon**, but the fuel
-# is expensive and uncertain (~$4/kg ≈ $35/MMBtu LHV) and the turbine + on-site H2
-# handling cost more than a gas peaker. Reuses the entire gas dispatch/cost path —
-# it is, economically, "a gas plant with pricey zero-carbon fuel". Region-invariant
-# (H2 is a globally-traded commodity); every figure is adjustable.
+# Green-hydrogen firming via PURCHASED H2 (opt-in alternative to gas, --firming h2).
+# Buy green H2, burn it in an H2-capable turbine: **zero combustion carbon**, pricey
+# fuel. Fuel price referenced to Lazard LCOH v4.0 (June 2024): unsubsidized green H2
+# (PEM) ≈ $5.25/kg; at Lazard's 8.8 kg-H2/MMBtu that is ≈ $46/MMBtu. (The IRA 45V
+# credit, up to $3/kg, and self-production cut this sharply — see LDES_H2 below for the
+# self-produced-from-overcapacity alternative.) Turbine + H2 handling cost more than a
+# gas peaker. Reuses the gas dispatch/cost path — "a gas plant with pricey zero-carbon
+# fuel". Region-invariant; every figure adjustable.
 GAS_H2 = GasParams(
-    name="Green H2 firming",
-    gas_price_mmbtu=35.0,          # ≈ $4/kg green H2 (LHV); adjustable
-    ccgt_capex_kw=1300.0,          # H2-ready turbine + H2 handling (vs 1100 NG)
+    name="Green H2 firming (purchased)",
+    gas_price_mmbtu=46.0,          # Lazard LCOH v4.0: $5.25/kg unsubsidized ÷ 8.8 kg/MMBtu
+    ccgt_capex_kw=1300.0,          # H2-ready turbine + H2 handling (vs 1100 NG, Lazard v17)
     ocgt_capex_kw=600.0,           # (vs 500 NG)
     carbon_price_today=0.0,
     carbon_trajectory="linear",
     carbon_intensity_ccgt=0.0,     # green H2 → no combustion CO2
     carbon_intensity_ocgt=0.0,
 )
+
+# ── Long-duration energy storage (LDES) presets — for the --ldes overlay ────────
+# A second storage tier the optimiser overlay can add ON TOP of LFP: LFP keeps doing
+# the cheap diurnal cycling, LDES soaks up multi-day RE *overcapacity* (otherwise
+# curtailed, hence ~free to charge) and discharges it during multi-day Dunkelflaute,
+# competing with the gas/H2 backup. Reuses BatteryParams; the decoupled power rating
+# is passed explicitly to the cost function. All figures adjustable; references below.
+#
+# For all: capex_kw_today = CHARGE kit ($/kW), discharge_capex_kw = DISCHARGE kit;
+# charge_power_mw / discharge_power_mw = installed power per MW-load. Energy capex is
+# per kWh of stored (mid-cycle) capacity. Augmentation/degradation as for LFP.
+#
+# (a) Iron-air (e.g. Form Energy): cheap energy, pricey power, low round-trip, ~100h.
+#     Energy ≈ $20/kWh, symmetric power BOP ≈ $1,500/kW (Form Energy public targets /
+#     NREL ATB 2024 LDES); RTE ≈ 50%.
+LDES_IRONAIR = BatteryParams(
+    name="LDES (iron-air)",
+    capex_kwh_today=20.0, capex_kw_today=1500.0, discharge_capex_kw=1500.0,
+    charge_power_mw=1.0, discharge_power_mw=1.0,
+    learning_rate=0.10, cumulative_gwh_2025=5.0, annual_additions_gwh=5.0,
+    additions_growth_rate=0.40, roundtrip_efficiency=0.50,
+    calendar_deg_per_yr=0.005, cycle_deg_per_fec=1e-5, om_frac_capex=0.02, wacc=0.08,
+)
+# (b) Self-produced green H2 (power→H2→power), the user's "make H2 on sunny days"
+#     case: a SMALL electrolyser (charge_power 0.35 MW/MW-load) slowly fills storage
+#     from surplus over many sunny hours; a FULL-SIZE H2 turbine (discharge 1.0)
+#     covers the load during lulls. Round-trip ≈ 35% (electrolysis ~65% × turbine
+#     ~55%). DEFAULT storage is above-ground tanks — NO geological cavern assumed —
+#     at ≈ $20/kWh-H2 (DOE/NREL bulk compressed H2); electrolyser ≈ $1,200/kW and
+#     H2 turbine ≈ $1,300/kW (Lazard LCOH v4.0 / NREL).
+LDES_H2 = BatteryParams(
+    name="LDES (self-produced H2, tanks)",
+    capex_kwh_today=20.0,           # above-ground tank H2 storage, $/kWh-H2 (no cavern)
+    capex_kw_today=1200.0,          # electrolyser (charge), $/kW  — Lazard LCOH/NREL
+    discharge_capex_kw=1300.0,      # H2 turbine/fuel cell (discharge), $/kW
+    charge_power_mw=0.35,           # small electrolyser: "slowly produce on sunny days"
+    discharge_power_mw=1.0,         # turbine sized to firm the load
+    learning_rate=0.12, cumulative_gwh_2025=2.0, annual_additions_gwh=3.0,
+    additions_growth_rate=0.45, roundtrip_efficiency=0.35,
+    calendar_deg_per_yr=0.010, cycle_deg_per_fec=1e-5, om_frac_capex=0.03, wacc=0.08,
+)
+# (c) Same, but with a SALT CAVERN for storage (geology permitting): energy collapses
+#     to ≈ $0.6/kWh-H2 (Lazard LCOH v4.0: $20/kg ÷ 33.3 kWh/kg). The optimistic case.
+LDES_H2_CAVERN = BatteryParams(
+    name="LDES (self-produced H2, salt cavern)",
+    capex_kwh_today=0.6, capex_kw_today=1200.0, discharge_capex_kw=1300.0,
+    charge_power_mw=0.35, discharge_power_mw=1.0,
+    learning_rate=0.12, cumulative_gwh_2025=2.0, annual_additions_gwh=3.0,
+    additions_growth_rate=0.45, roundtrip_efficiency=0.35,
+    calendar_deg_per_yr=0.010, cycle_deg_per_fec=1e-5, om_frac_capex=0.03, wacc=0.08,
+)
+LDES_PRESETS = {"iron-air": LDES_IRONAIR, "h2": LDES_H2, "h2-cavern": LDES_H2_CAVERN}
+
 
 SOLAR_EU = TechParams("Solar PV (EU)", lcoe_today=60.0, learning_rate=0.30,
                       cumulative_gw_2025=2900.0, annual_additions_gw=650.0,

@@ -6,9 +6,10 @@ import os
 import matplotlib.pyplot as plt
 
 from .params import (REGIONS, WORKLOAD_PRESETS, WorkloadProfile,
-                     AI_TRAINING, RESOURCE_PRESETS, FIRMING_PRESETS)
+                     AI_TRAINING, RESOURCE_PRESETS, FIRMING_PRESETS, LDES_PRESETS)
 from .simulate import run_region_key, run_full_suite
-from .analysis import run_flex_sensitivity, run_resource_sensitivity, run_tornado
+from .analysis import (run_flex_sensitivity, run_resource_sensitivity, run_tornado,
+                       run_ldes_overlay)
 from .plots import plot_flex_heatmap, plot_tornado
 
 
@@ -45,6 +46,9 @@ def build_arg_parser():
     p.add_argument("--tornado", action="store_true",
                    help="parity-gap tornado: sensitivity of RE-vs-gas competitiveness "
                         "to key assumptions → figure")
+    p.add_argument("--ldes", choices=list(LDES_PRESETS),
+                   help="long-duration storage overlay: can iron-air or self-produced "
+                        "H2 (charged from RE overcapacity) displace the residual gas?")
     p.add_argument("--grid-steps", type=int, help="advanced: optimiser grid resolution")
     p.add_argument("--mc", type=int, help="advanced: Monte-Carlo weather years")
     return p
@@ -92,6 +96,15 @@ def main(argv=None):
         run_resource_sensitivity(region_key=region, re_target=re_t,
                                  years=args.years, seed=args.seed,
                                  grid_steps=args.grid_steps, n_mc=args.mc)
+        return
+
+    # LDES overlay (iron-air / self-produced H2)
+    if args.ldes:
+        region = args.region or "eu"
+        re_t = (args.re or [0.90])[0]
+        run_ldes_overlay(region_key=region, re_target=re_t, target_year=2035,
+                         ldes_tech=args.ldes, grid_steps=args.grid_steps or 13,
+                         n_mc=args.mc or 12, seed=args.seed)
         return
 
     # Parity-gap tornado sensitivity

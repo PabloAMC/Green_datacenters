@@ -74,6 +74,37 @@ def test_gas_pure_lcoe():
     assert abs(m.gas_pure_lcoe(m.GAS, 0, 0.07) - 43.7) < 0.1
 
 
+def test_ldes_cost_and_overlay():
+    """LDES cost rises with storage/power; the 2-storage overlay displaces gas
+    (more LDES energy → lower gas fraction at a fixed deficit-prone build)."""
+    import numpy as np
+    from lcoe.costs import ldes_annual_cost
+    from lcoe.dispatch import dispatch_ldes_overlay
+    from lcoe.weather import solar_clearsky
+    h = m.LDES_H2
+    c24 = ldes_annual_cost(h, 24, 20.0, 1200.0, 1300.0, 0.35, 1.0, h.wacc, 20, 0.0)
+    c96 = ldes_annual_cost(h, 96, 20.0, 1200.0, 1300.0, 0.35, 1.0, h.wacc, 20, 0.0)
+    assert 0 < c24 < c96                         # more storage → more cost
+    assert ldes_annual_cost(h, 0, 20, 1200, 1300, 0.35, 1.0, h.wacc, 20) == 0.0
+    # overlay: a deficit-prone build (modest overbuild), LDES displaces gas
+    cs = solar_clearsky(3.8)
+    rng = np.random.default_rng(0)
+    wkw = dict(wind_solar_corr=-0.35, syn_loading=0.5, syn_persistence=0.85)
+    gas_frac, _peak, _le, _de = dispatch_ldes_overlay(
+        cs, 7.0, rng, wkw, 4.0, 3.0, 6.0, 0.667, 0.924,
+        np.array([0.0, 48.0, 168.0]), 0.5, 1.0, 0.40, 3)
+    assert gas_frac[0] >= gas_frac[1] >= gas_frac[2]   # more LDES → less gas
+    assert gas_frac[2] < gas_frac[0]
+
+
+def test_ldes_presets():
+    # tanks are the default (no cavern); cavern is much cheaper energy; asymmetric power
+    assert m.LDES_H2.capex_kwh_today == 20.0          # above-ground tanks
+    assert m.LDES_H2_CAVERN.capex_kwh_today < 1.0     # salt cavern ~$0.6/kWh
+    assert m.LDES_H2.charge_power_mw < m.LDES_H2.discharge_power_mw  # small electrolyser
+    assert set(m.LDES_PRESETS) == {"iron-air", "h2", "h2-cavern"}
+
+
 def test_h2_firming_preset():
     """Green-H2 firming: zero combustion carbon, pricier fuel, flat over time."""
     assert m.GAS_H2.carbon_intensity_ccgt == 0.0 and m.GAS_H2.carbon_intensity_ocgt == 0.0

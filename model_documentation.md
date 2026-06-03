@@ -627,6 +627,39 @@ This is normalised so $p(0) = p_0$ exactly. The EU default parameters ($p_0 = \$
 | Carbon price trajectory | Linear ($0) | Logistic ($70→$200) | EU ETS Fit-for-55 |
 | Plant lifetime (yr) | 25 | 25 | Industry standard |
 
+### 7.5 Long-duration storage & self-produced-H₂ firming (opt-in overlay, `--ldes`)
+
+Can a cheap long-duration store displace the residual gas at high RE? The `--ldes`
+overlay answers this with a genuine **2-storage chronological dispatch**: at the no-LDES
+optimal build, LFP keeps doing the diurnal cycle while an LDES soaks up otherwise-curtailed
+surplus and discharges it through multi-day Dunkelflaute, competing with the gas backup.
+It scans LDES energy size and reports gas displaced and delivered LCOE. (Greedy overlay —
+the LFP/overbuild build is fixed from the no-LDES optimum, so the benefit shown is a
+*conservative lower bound*; reduced fidelity.)
+
+**Technologies** (`LDES_PRESETS`; charge=electrolyser, discharge=turbine, energy=storage):
+
+| Tech | Energy $/kWh | Charge $/kW | Discharge $/kW | RTE | Source |
+|------|-------------|-------------|----------------|-----|--------|
+| Iron-air | 20 | 1,500 (sym.) | 1,500 | 50% | Form Energy targets / NREL ATB 2024 |
+| Self-produced H₂ — **tanks** (default) | 20 | 1,200 | 1,300 | 35% | DOE/NREL bulk compressed; Lazard LCOH v4.0 |
+| Self-produced H₂ — salt cavern | 0.6 | 1,200 | 1,300 | 35% | Lazard LCOH v4.0 ($20/kg ÷ 33.3 kWh/kg) |
+
+The H₂ case is the user's "make H₂ on sunny days from overcapacity": a **small electrolyser**
+(charge 0.35 MW/MW-load, slowly filling storage) + a **full-size H₂ turbine** (discharge 1.0).
+Green-H₂ *purchased* fuel (`--firming h2`, §7.2) is the alternative where you buy H₂ at
+Lazard's ~$5.25/kg unsubsidised (≈$46/MMBtu) rather than self-produce it.
+
+**Finding (EU 90% RE, 2035, greedy overlay).** Self-produced H₂ **is sufficient** to cut the
+residual gas from ~10% to ~3.4% of load (iron-air, with full charge power, reaches ~0%); the
+binding limit is *power* (electrolyser/turbine), not energy — so only **~1–4 days** of storage
+is needed, not weeks (more just adds cost). Whether it **pays** turns on the storage medium:
+with above-ground **tanks it does not** (LDES capex ≈ the gas it displaces → net ≈ flat),
+with a **salt cavern it marginally does** (≈ −$3/MWh). Iron-air eliminates gas entirely but
+its power capex outweighs the saving. So at the model's heavy-overbuild high-RE optimum, the
+last few % of gas is cheap insurance that LDES can match but rarely beat — *unless* cheap
+geological storage is available or (via joint co-optimisation) overbuild is traded for LDES.
+
 ---
 
 ## 8. System LCOE and 3D Optimisation
