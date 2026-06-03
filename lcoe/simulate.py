@@ -18,7 +18,8 @@ from .dispatch import ChronologicalSimulator
 from .optimize import optimal_cost_3d, delivered_cost_split
 from .reporting import print_summary, export_results
 from .plots import (plot_cost_trajectories, plot_reliability_sensitivity,
-                    plot_optimal_mix, plot_component_breakdown)
+                    plot_optimal_mix, plot_component_breakdown, plot_h2_breakdown)
+from .h2system import h2_system_trajectory
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -41,6 +42,7 @@ def run_simulation(
     seed: int               = 0,
     grid_ppa: Optional[GridPPAParams] = None,
     design_p90: bool        = False,
+    h2_system: bool         = False,
 ) -> Dict:
     if reliabilities is None:
         reliabilities = [0.80, 0.90, 0.95]
@@ -174,6 +176,13 @@ def run_simulation(
             scen["opt_B_p90"] = opt_B_p90
         results["scenarios"][R] = scen
 
+    # Optional: fully-optimised gas-free green-H₂ system (no RE target — minimise LCOE
+    # over solar/wind/LFP/electrolyser/H₂-storage; residual bought as green H₂). Feeds
+    # the fig1 H₂ line and the fig6 breakdown.
+    if h2_system:
+        results["h2_system"] = h2_system_trajectory(
+            solar, wind, battery, mean_irr, mean_wind_ms, sys, years, seed=seed)
+
     return results
 
 
@@ -184,13 +193,13 @@ def _nearest_re(results, target: float) -> float:
 
 def run_region(region, solar, wind, battery, gas, smr, sys, workload,
                mean_irr, mean_wind_ms, reliabilities, prefix, seed=0, grid_ppa=None,
-               design_p90=False):
+               design_p90=False, h2_system=False):
     print(f"\n{'━'*42} {region} {'━'*42}")
     results = run_simulation(
         solar=solar, wind=wind, battery=battery, gas=gas, smr=smr,
         sys=sys, workload=workload, mean_irr=mean_irr,
         mean_wind_ms=mean_wind_ms, reliabilities=reliabilities, seed=seed,
-        grid_ppa=grid_ppa, design_p90=design_p90,
+        grid_ppa=grid_ppa, design_p90=design_p90, h2_system=h2_system,
     )
     print_summary(results, region=region)
     export_results(results, region=region, prefix=prefix)
@@ -208,6 +217,8 @@ def run_region(region, solar, wind, battery, gas, smr, sys, workload,
         f"{prefix}_fig4_breakdown":     plot_component_breakdown(results, bd1, region),
         f"{prefix}_fig5_breakdown":     plot_component_breakdown(results, bd2, region),
     }
+    if "h2_system" in results:   # fig6 = fully-optimised gas-free green-H₂ system breakdown
+        figs[f"{prefix}_fig6_h2system"] = plot_h2_breakdown(results, region)
     for name, fig in figs.items():
         fig.savefig(f"figs/{name}.png", dpi=200, bbox_inches="tight")
         plt.close(fig)
@@ -216,12 +227,13 @@ def run_region(region, solar, wind, battery, gas, smr, sys, workload,
 
 def run_region_key(region_key, workload, reliabilities, prefix,
                    sys_overrides=None, seed=42, design_p90=False,
-                   mean_irr=None, mean_wind_ms=None, gas=None):
+                   mean_irr=None, mean_wind_ms=None, gas=None, h2_system=False):
     """Run a region (from REGIONS) with a chosen workload; thin wrapper over run_region.
 
     `mean_irr` / `mean_wind_ms` override the region's default resource (used by the
     resource-quality sensitivity); `design_p90` adds the robustness-design series;
-    `gas` overrides the firming resource (e.g. green-H2 via --firming h2)."""
+    `gas` overrides the firming resource (e.g. green-H2 via --firming h2); `h2_system`
+    adds the fully-optimised gas-free H₂ system (fig1 line + fig6)."""
     cfg = REGIONS[region_key]
     sys = _sys_with(cfg["sys"], **sys_overrides) if sys_overrides else cfg["sys"]
     label = f"{cfg['label']} ({workload.name})"
@@ -231,7 +243,7 @@ def run_region_key(region_key, workload, reliabilities, prefix,
                       cfg["mean_irr"] if mean_irr is None else mean_irr,
                       cfg["mean_wind_ms"] if mean_wind_ms is None else mean_wind_ms,
                       reliabilities, prefix, seed=seed, grid_ppa=cfg.get("grid_ppa"),
-                      design_p90=design_p90)
+                      design_p90=design_p90, h2_system=h2_system)
 
 
 def run_full_suite():
@@ -243,8 +255,8 @@ def run_full_suite():
     The interruptible regime (cheap compute) is explored via `--flex-sweep`.
     """
     reliabilities = [0.70, 0.80, 0.85, 0.90, 0.95]
-    run_region_key("us", FIRM, reliabilities, prefix="us_firm", seed=42)
-    run_region_key("eu", FIRM, reliabilities, prefix="eu_firm", seed=42)
+    run_region_key("us", FIRM, reliabilities, prefix="us_firm", seed=42, h2_system=True)
+    run_region_key("eu", FIRM, reliabilities, prefix="eu_firm", seed=42, h2_system=True)
     print("\nDone — figures saved in figs/")
 
 

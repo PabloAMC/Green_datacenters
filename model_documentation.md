@@ -705,6 +705,14 @@ spike. (Caveats: the low $104 partly reflects the synthetic weather's sun/wind s
 and the conservative tank/electrolyser learning; multi-start NM on reduced fidelity — treat
 the *shape* and *direction* as robust, the absolute as indicative.)
 
+**In the figures.** The headline firm suite draws the **per-year trajectory** of this
+optimum (`h2_system_trajectory`, reusing the same `dispatch_h2_vec` + cost model, B_lfp
+fixed at 6h, warm-started) as the **"Optimised gas-free H₂ system" line in fig1** and its
+capex/opex **breakdown in fig6** (generation / LFP / electrolyser / H₂ storage / turbine /
+purchased-H₂ — all zero-carbon). The line lands below the high-RE-with-gas curves in both
+regions: a fully-optimised gas-free build is *cheaper* than the constrained 90%-RE-with-gas
+case, because it is free to choose a solar-heavy, big-electrolyser mix.
+
 ---
 
 ## 8. System LCOE and 3D Optimisation

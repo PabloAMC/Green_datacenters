@@ -20,6 +20,7 @@ except ImportError:
 
 C_OPT = "#3A86FF"; C_GAS = "#6B705C"; C_BATT = "#9D4EDD"; C_SMR = "#E71D36"
 C_SOL = "#FF9F1C"; C_WIN = "#2EC4B6"; C_PPA = "#06D6A0"; C_CFE = "#118AB2"
+C_H2 = "#073B4C"; C_ELEC = "#8ECAE6"; C_STORE = "#0096C7"; C_TURB = "#48CAE4"
 REFS  = "Lazard v18 · Way et al. Joule 2022 · NREL ATB 2024 · EU ETS · IPCC AR6"
 PALETTE = ["#3A86FF", "#FF9F1C", "#2EC4B6", "#9D4EDD", "#FB5607", "#E71D36"]
 
@@ -55,6 +56,9 @@ def plot_cost_trajectories(results, region="US"):
     if "grid_cfe" in results:
         ax.plot(yrs, results["grid_cfe"], color=C_CFE, lw=2, ls=(0, (1, 1)),
                 label=results["grid_cfe_name"])
+    if "h2_system" in results:
+        ax.plot(yrs, results["h2_system"]["lcoe"], color=C_H2, lw=2.5,
+                label="Optimised gas-free H₂ system")
     ax.set(xlabel="Year", ylabel="Delivered cost ($/MWh)",
            title=f"Delivered cost trajectory — {region}",
            xlim=(yrs[0], yrs[-1]), ylim=(0, None))
@@ -145,6 +149,40 @@ def plot_component_breakdown(results, reliability=0.90, region="US"):
               title="solid = capex · hatched = opex")
     ax.text(0.01, 0.01, REFS, transform=ax.transAxes, fontsize=6, va="bottom",
             alpha=0.5, family="monospace")
+    fig.tight_layout(); return fig
+
+
+def plot_h2_breakdown(results, region="US"):
+    """fig6 — cost breakdown of the FULLY-OPTIMISED gas-free green-H₂ system (no RE
+    target: minimise LCOE over solar+wind+LFP + self-produced H₂, residual bought as
+    green H₂). Analogue of fig4 but with H₂ components instead of gas; all zero-carbon."""
+    h = results["h2_system"]; yrs = results["years"]
+    bands = [
+        (h["gen_capex"],     "Generation — capex",   C_SOL,  None),
+        (h["gen_om"],        "Generation — O&M",     C_SOL,  "////"),
+        (h["lfp_capex"],     "LFP battery — capex",  C_BATT, None),
+        (h["lfp_om"],        "LFP battery — O&M",    C_BATT, "////"),
+        (h["elec_capex"],    "Electrolyser",         C_ELEC, None),
+        (h["store_capex"],   "H₂ storage (tanks)",   C_STORE, None),
+        (h["turbine_capex"], "H₂ turbine",           C_TURB, None),
+        (h["buy_h2"],        "Purchased green H₂",   C_H2,   ".."),
+    ]
+    fig, ax = plt.subplots(figsize=(8.5, 4.8))
+    bottom = np.zeros_like(yrs, dtype=float)
+    for vals, lbl, col, hatch in bands:
+        if np.allclose(vals, 0):
+            continue
+        ax.fill_between(yrs, bottom, bottom + vals, label=lbl, facecolor=col,
+                        alpha=0.85, hatch=hatch, edgecolor="white", linewidth=0.3)
+        bottom = bottom + vals
+    ax.plot(yrs, h["lcoe"], color="black", lw=1.5, ls="--", label="Total (optimised)")
+    ax.set(xlabel="Year", ylabel="Delivered cost ($/MWh)",
+           title=f"Optimised gas-free green-H₂ system — {region}",
+           xlim=(yrs[0], yrs[-1]), ylim=(0, None))
+    ax.legend(fontsize=8, frameon=True, facecolor="white", loc="upper left",
+              bbox_to_anchor=(1.01, 1.0), title="hatched = opex/fuel")
+    ax.text(0.01, 0.01, REFS + " · Lazard LCOH v4.0", transform=ax.transAxes,
+            fontsize=6, va="bottom", alpha=0.5, family="monospace")
     fig.tight_layout(); return fig
 
 

@@ -16,6 +16,7 @@ from .dispatch import *          # noqa: F401,F403
 from .optimize import *          # noqa: F401,F403
 from .reporting import *         # noqa: F401,F403
 from .plots import *             # noqa: F401,F403
+from .h2system import *          # noqa: F401,F403
 from .simulate import *          # noqa: F401,F403
 from .analysis import *          # noqa: F401,F403
 from .cli import *               # noqa: F401,F403

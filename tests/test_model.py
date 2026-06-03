@@ -74,6 +74,40 @@ def test_gas_pure_lcoe():
     assert abs(m.gas_pure_lcoe(m.GAS, 0, 0.07) - 43.7) < 0.1
 
 
+def test_h2_dispatch_vec_monotone():
+    """More electrolyser + H2 storage → less bought H2 (year-vectorised 2-storage)."""
+    import numpy as np
+    from lcoe.dispatch import dispatch_h2_vec
+    from lcoe.weather import solar_clearsky, generate_weather_year
+    cs = solar_clearsky(3.8); rng = np.random.default_rng(0)
+    ny = 4; sols = np.empty((ny, 8760)); wins = np.empty((ny, 8760))
+    for k in range(ny):
+        s, w = generate_weather_year(cs, 7.0, rng, -0.35, 0.5, 0.85)
+        sols[k] = s; wins[k] = w
+    lp = min(1, 4 / 6)
+    b0, _ = dispatch_h2_vec(sols, wins, 11, 10, 6, lp, 0.924, 0.0, 0.0, 1.0, 0.35)
+    b1, _ = dispatch_h2_vec(sols, wins, 11, 10, 6, lp, 0.924, 48.0, 0.5, 1.0, 0.35)
+    b2, _ = dispatch_h2_vec(sols, wins, 11, 10, 6, lp, 0.924, 168.0, 1.0, 1.0, 0.35)
+    assert b0 > b1 > b2 and b2 < 0.02
+
+
+def test_h2_system_optimises_and_is_zero_carbon():
+    """The gas-free H2 system optimiser returns a finite cheaper-over-time trajectory
+    whose per-year components sum to the reported LCOE (no gas/carbon band)."""
+    import numpy as np
+    from lcoe.params import REGIONS
+    from lcoe.h2system import h2_system_trajectory
+    cfg = REGIONS["eu"]
+    out = h2_system_trajectory(cfg["solar"], cfg["wind"], cfg["battery"],
+                               cfg["mean_irr"], cfg["mean_wind_ms"], cfg["sys"],
+                               years=3, seed=42, n_mc=4)
+    comps = ["gen_capex", "gen_om", "lfp_capex", "lfp_om", "elec_capex",
+             "store_capex", "turbine_capex", "buy_h2"]
+    assert np.allclose([sum(out[c][i] for c in comps) for i in range(4)], out["lcoe"])
+    assert out["lcoe"][-1] < out["lcoe"][0]            # cost falls over time
+    assert all(0.0 <= out["buy_frac"][i] <= 1.0 for i in range(4))
+
+
 def test_ldes_cost_and_overlay():
     """LDES cost rises with storage/power; the 2-storage overlay displaces gas
     (more LDES energy → lower gas fraction at a fixed deficit-prone build)."""

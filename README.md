@@ -21,7 +21,7 @@ The **default model is a FIRM, always-on datacenter**: gas turbines are sized to
 *   **`scratch/plot_comparison.py`**: Regenerates the US vs. Europe 90%-RE firm trajectory and annotates the parity crossover.
 *   **`tests/test_model.py`**: Regression + unit tests (LCOE formulas, weather-CF marginals, dispatch energy balance, firm/shed consistency, RE feasibility). Runs standalone (`python tests/test_model.py`) or under `pytest` — no extra dependency required.
 *   **`output/`**: Machine-readable results written on every run — one tidy CSV (`<prefix>_results.csv`, a row per RE-target × year) and one structured JSON per region, so the figures and documentation tables can be regenerated programmatically instead of hand-transcribed.
-*   **`figs/`**: Generated plots per region — `fig1` cost trajectory, `fig2` cost vs RE fraction, `fig3` optimal solar/wind/battery mix, `fig4`/`fig5` cost breakdown by factor split into **capex vs opex** (at 70% / 85% RE; solid = capex, hatched = opex) — plus the US-vs-EU comparison (at 70% RE) and (via `--flex-sweep`) the flexibility trade-off heatmap.
+*   **`figs/`**: Generated plots per region — `fig1` cost trajectory (incl. the gas baseline, SMR, grid+PPA / 24/7-CFE references, and the **fully-optimised gas-free green-H₂ system**), `fig2` cost vs RE fraction, `fig3` optimal solar/wind/battery mix, `fig4`/`fig5` cost breakdown by factor split into **capex vs opex** (at 70% / 85% RE), **`fig6` the gas-free green-H₂ system breakdown** (generation / LFP / electrolyser / H₂ storage / turbine / purchased-H₂, all zero-carbon) — plus the US-vs-EU comparison (at 70% RE) and (via `--flex-sweep`) the flexibility trade-off heatmap.
 
 ---
 
