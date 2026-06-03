@@ -107,10 +107,18 @@ def test_rewacc_identity_and_monotonicity():
 
 
 def test_battery_delivered_cost():
-    doc = {2: 11.8, 4: 20.2, 8: 35.5, 12: 51.9, 24: 102.1}
+    # v5.4 augmentation model (US, 7% WACC, 0.5 EFC/day)
+    doc = {2: 7.4, 4: 13.1, 8: 23.6, 12: 34.7, 24: 68.6}
     for h, exp in doc.items():
         ann = m.battery_annualised_cost(m.BATTERY_US, h, 180.0, 140.0, 0.07, 20, 0.5)
         assert abs(ann / 8760.0 - exp) < 0.1, f"battery {h}h: {ann/8760:.2f} != {exp}"
+
+
+def test_battery_cost_increases_with_cycling():
+    """More throughput (higher EFC/day) → more augmentation → higher cost."""
+    lo = m.battery_annualised_cost(m.BATTERY_US, 6, 180.0, 140.0, 0.07, 20, 0.3)
+    hi = m.battery_annualised_cost(m.BATTERY_US, 6, 180.0, 140.0, 0.07, 20, 1.0)
+    assert hi > lo
 
 
 def test_crf():

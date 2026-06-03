@@ -18,3 +18,6 @@ env/
 
 # Note: figs/, output/, and scratch/ ARE tracked on purpose — the README and
 # model_documentation.md reference the generated figures and scratch/v53_run.log.
+
+# Ad-hoc CLI / sweep figures (regenerate on demand; keep only the canonical suite)
+figs/cli_*

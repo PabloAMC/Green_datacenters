@@ -86,7 +86,7 @@ class ChronologicalSimulator:
         n       = len(self._cs)
 
         soc = np.zeros(n); gas = np.zeros(n); drop = np.zeros(n)
-        soc_sum = np.zeros(n); soc_sum2 = np.zeros(n)
+        dis_sum = np.zeros(n)         # annual cell discharge throughput (for EFC)
         gas_peak = np.zeros(n)        # peak residual AFTER shedding (interruptible case)
         gas_peak_firm = np.zeros(n)   # peak residual with NO shedding (firm backup sizing)
 
@@ -100,6 +100,7 @@ class ChronologicalSimulator:
             # 1. Discharge battery
             dis = np.minimum(np.minimum(soc * eta_dis, self._batt_pow), deficit)
             soc -= dis / eta_dis;  deficit -= dis
+            dis_sum += dis                                       # accumulate throughput
             gas_peak_firm = np.maximum(gas_peak_firm, deficit)  # pre-shed (firm)
 
             # 2. SHED up to `flex` of the load (compute lost; NOT recovered).
@@ -120,20 +121,17 @@ class ChronologicalSimulator:
                                          self._batt_pow), surplus)
             soc += chg * eta_chg
 
-            soc_sum  += soc
-            soc_sum2 += soc * soc
-
-        # DoD-weighted FEC
-        soc_mean_yr = soc_sum / 8760.0
-        soc_var_yr  = np.maximum(soc_sum2 / 8760.0 - soc_mean_yr ** 2, 0.0)
-        soc_std_yr  = np.sqrt(soc_var_yr)
+        # Throughput-based equivalent full cycles (v5.4): annual cell-discharge
+        # throughput ÷ rated energy capacity — a standard, robust cycle count that
+        # replaces the earlier 2σ(SoC) heuristic. (Full rainflow half-cycle counting
+        # with Wöhler/DoD weighting is the further refinement; throughput EFCs are
+        # the widely-used proxy and are exact for symmetric daily cycling.)
         with np.errstate(divide='ignore', invalid='ignore'):
-            dod_eff  = np.where(self._soc_max > 0,
-                                np.clip(2.0 * soc_std_yr /
-                                        np.where(self._soc_max > 0, self._soc_max, 1.0),
-                                        0.0, 1.0),
+            efc_year = np.where(self._soc_max > 0,
+                                (dis_sum / eta_dis)
+                                / np.where(self._soc_max > 0, self._soc_max, 1.0),
                                 0.0)
-        fec_daily = dod_eff ** self.batt.dod_exponent
+        fec_daily = efc_year / 365.0
 
         return (gas / 8760.0, fec_daily, gas_peak, gas_peak_firm, drop / 8760.0,
                 float(sol_tr.mean()), float(win_tr.mean()))

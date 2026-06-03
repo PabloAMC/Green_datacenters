@@ -1,10 +1,12 @@
-# Off-Grid Datacenter LCOE Model (v5.3)
+# Off-Grid Datacenter LCOE Model (v5.4)
 
 An optimization model that finds the least-cost combination of solar PV, onshore wind, LFP battery storage, and natural gas backup to power an off-grid datacenter at a target renewable energy fraction, across the **US** and **Europe**.
 
 The **default model is a FIRM, always-on datacenter**: gas turbines are sized to cover **100% of load** whenever sun/wind are absent and batteries are exhausted, so the datacenter never shuts down and the worst case is a known, **capped opex** (run on gas). Solar + wind + battery are an incremental investment that displaces gas fuel and carbon where it pays. Optionally, a workload can be made **interruptible** (cheap/spot compute), in which case the model sheds load only when the lost compute is worth less than the gas needed to serve it.
 
-> **v5.3 — per-technology cost of capital.** A single flat WACC is replaced by differentiated financing: solar/wind **5.5%** (low-risk, long-life infrastructure), LFP battery **7%**, gas **9%** (merchant + carbon-policy risk). Cheaper RE and dearer gas pull **EU 90% RE parity to ~2034** (from ~2035) and **95% to ~2036** (from ~2040), while the **US cheap-gas moat still holds** (no parity within the horizon, gap narrowed). Legacy flat-7% is recoverable by setting each `wacc` to 0.07. See *Key Upgrades*.
+> **v5.4 — battery augmentation + throughput cycle counting; no optimiser hysteresis.** Storage cost moves from lumpy full-replacement to **capacity augmentation** (top up faded cells yearly — standard practice, ~30–35% cheaper); cycling is counted as **throughput equivalent-full-cycles**; and the optimiser's path-regularisation penalty (a source of year-to-year hysteresis) is removed. Net: RE LCOE falls a further ~8–15% → **EU 90% RE parity ~2033, 95% ~2035; US now reaches parity at 70–80% RE (~2038–39)** (90%+ still never beats cheap US gas).
+>
+> **v5.3 — per-technology cost of capital.** A single flat WACC is replaced by differentiated financing: solar/wind **5.5%** (low-risk, long-life infrastructure), LFP battery **7%**, gas **9%** (merchant + carbon-policy risk). Legacy flat-7% is recoverable by setting each `wacc` to 0.07. See *Key Upgrades*.
 
 > **v5.2 — demand flexibility as economic shedding.** Earlier versions let paused load be "recovered later," which secretly assumed idle over-provisioned GPUs (economically irrational, since hardware capex ≫ energy). v5.2 drops that: premium compute never sheds and collapses to the firm/capped-opex case; only genuinely cheap compute sheds.
 
@@ -70,11 +72,13 @@ PYTHONPATH=. python scratch/plot_comparison.py
 
 ---
 
-## 💡 Key Upgrades (v4 → v5.3)
+## 💡 Key Upgrades (v4 → v5.4)
 
-Each version removed an assumption that made high renewable fractions look cheaper/easier than they are. The cumulative effect is large: EU 90%-RE parity moved from v4's "Q2 2025" to **~2034** for an always-on datacenter.
+Each version removed an assumption that made high renewable fractions look cheaper/easier than they are. The cumulative effect is large: EU 90%-RE parity moved from v4's "Q2 2025" to **~2033** for an always-on datacenter.
 
-0.  **Per-technology cost of capital (v5.3, this release).** A single flat WACC is replaced by differentiated real WACC + asset life: solar/wind **5.5%** (30/25 yr), battery **7%** (20 yr), gas **9%** (25 yr). The bundled generation LCOE is re-annualised at the new WACC (`rewacc_lcoe`); each component is levelised over its own life (fixing the prior mixed-horizon treatment). Cheaper RE and dearer gas pull EU parity ~1 yr earlier; the US moat holds.
+-1. **Battery augmentation + throughput cycle counting; no hysteresis (v5.4, this release).** Storage cost moves from full-system replacement to yearly **capacity augmentation** (top up only the faded cells — ~30–35% cheaper); degradation is driven by **throughput equivalent-full-cycles** rather than a 2σ(SoC) proxy; and the optimiser's path-regularisation penalty (year-to-year hysteresis) is removed. Cheaper storage pulls parity earlier across the board.
+
+0.  **Per-technology cost of capital (v5.3).** A single flat WACC is replaced by differentiated real WACC + asset life: solar/wind **5.5%** (30/25 yr), battery **7%** (20 yr), gas **9%** (25 yr). The bundled generation LCOE is re-annualised at the new WACC (`rewacc_lcoe`); each component is levelised over its own life (fixing the prior mixed-horizon treatment). Cheaper RE and dearer gas pull EU parity ~1 yr earlier; the US moat holds.
 
 1.  **No free load-shedding (v5).** v4 silently dropped up to 20–40% of load during deficits yet counted it as "renewable" (~8% of annual load vanished). Fixed.
 2.  **Consistent battery cost basis (v5).** LFP cells are globally traded, so the **energy** component is region-invariant ($180/kWh); only the **power/BOS** component carries a regional premium (US $140/kW, EU $175/kW). EU storage is modestly *more* expensive than the US — opposite of v4's 2.75×-cheaper artefact.
@@ -86,19 +90,19 @@ Inherited from v4: 3D optimisation over (solar, wind, battery); Gaussian-copula 
 
 ---
 
-## 📊 Summary of Crossover Results (FIRM / always-on, v5.3)
+## 📊 Summary of Crossover Results (FIRM / always-on, v5.4)
 
-From `scratch/v53_run.log` (tables regenerable via `tools/regen_doc_tables.py`). These are the relevant numbers for any valuable datacenter (premium/AI workloads never shed and collapse to firm). Gas baseline: US flat ~$46/MWh; EU rising from $114 (2025) to $163 (2040) as carbon prices climb.
+From `scratch/v54_run.log` (tables regenerable via `tools/regen_doc_tables.py`). These are the relevant numbers for any valuable datacenter (premium/AI workloads never shed and collapse to firm). Gas baseline: US flat ~$46/MWh; EU rising from $114 (2025) to $163 (2040) as carbon prices climb.
 
 > **On-grid reference (new).** Every trajectory/reliability figure and the summary now also plot a **Grid + renewable-PPA** line — the realistic alternative of staying on the grid and signing a renewable PPA (all-in ≈ \$75/MWh US, \$117/MWh EU in 2025, declining with the solar learning curve). It sits *below* the off-grid high-RE optimum in both regions, making explicit that **going off-grid is itself a cost premium**. A second line, **Grid + 24/7 CFE**, adds a premium for hour-by-hour carbon-free matching (≈\$115/MWh US, \$172/MWh EU in 2025). Both are annual-vs-hourly reference lines — not part of the optimisation.
 
 ### US — 90% RE
-*   **2025 LCOE:** $176.9/MWh; **2040:** $90.3/MWh. **Parity: >2040** at every RE target.
-*   *Why?* Extremely cheap, untaxed US gas (~$46/MWh even at a 9% WACC) is a moat clean energy can't cross within the horizon at high RE fractions. v5.3's cheaper RE financing narrows the gap (90% RE: +316% → +284% vs gas) but doesn't close it.
+*   **2025 LCOE:** $161.8/MWh; **2040:** $85.0/MWh. **Parity (90% RE): >2040.** But **70–80% RE now reach parity ~2038–39** as cheaper (augmented) storage carries moderate-RE builds below $46.
+*   *Why?* Extremely cheap, untaxed US gas (~$46/MWh even at a 9% WACC) is a moat clean energy can't cross within the horizon at *high* RE fractions, where heavy wind overbuild (~7–11×) is needed for multi-day lulls.
 
 ### Europe — 90% RE
-*   **2025 LCOE:** $196.6/MWh; **2040:** $119.0/MWh. **Parity: ~2034** (70–80% RE reach parity ~2025–2027; **85% ~2029**; 95% ~2036).
+*   **2025 LCOE:** $181.7/MWh; **2040:** $113.6/MWh. **Parity: ~2033** (70–80% RE reach parity ~2025; **85% ~2027**; 95% ~2035).
 *   *Why?* Expensive, carbon-taxed EU gas makes RE competitive — but an *always-on* datacenter must build enough firm capacity (≈11× solar + 10× wind + 6h battery at 90%) to ride out week-long Dunkelflaute, which keeps 90%+ parity in the mid-2030s.
 
 ### If the compute is cheap (interruptible)
-For low-value/spot compute, shedding the most expensive hours helps a lot: at EU 90% RE in 2030, a 95%-interruptible workload valued at $25/MWh reaches ~$32/MWh (parity by 2025) versus the firm $174/MWh. See the `--flex-sweep` figures. Premium AI ($900/MWh) sheds nothing and stays firm.
+For low-value/spot compute, shedding the most expensive hours helps a lot: at EU 90% RE in 2030, a 95%-interruptible workload valued at $25/MWh reaches roughly the gas variable cost (parity by 2025) versus the firm ~$150/MWh. See the `--flex-sweep` figures. Premium AI ($900/MWh) sheds nothing and stays firm.

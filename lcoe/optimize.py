@@ -102,14 +102,11 @@ def optimal_cost_3d(
         # preventing the optimizer from accepting small-RE solutions cheaply.
         penalty = penalty_w * violation + penalty_w * 5.0 * violation ** 2
 
-        # Path regularization penalty to prevent bouncing in flat cost valley
-        penalty_smooth = 0.0
-        if prev_x is not None:
-            # Scale battery capacity deviation so it's comparable to C_sol/C_win
-            delta = (x - prev_x) * np.array([1.0, 1.0, 0.1])
-            penalty_smooth = 0.001 * np.sum(delta ** 2)
-
-        return c_gen + c_stor + c_gas + c_pen + penalty + penalty_smooth
+        # (v5.4) The previous path-regularization penalty was removed: it biased the
+        # objective toward the prior year's build, introducing year-to-year hysteresis
+        # in the reported optimal mix. prev_x is still used purely as a warm-start
+        # candidate below, which speeds convergence without distorting the cost.
+        return c_gen + c_stor + c_gas + c_pen + penalty
 
     starts = [
         np.array([sys.c_sol_max * 0.2, sys.c_win_max * 0.1, sys.storage_hours_max * 0.05]),

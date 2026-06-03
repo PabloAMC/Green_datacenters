@@ -1,9 +1,19 @@
 # Off-grid Datacenter LCOE Model — Technical Documentation
 
-**Model version:** v5.3  
-**Code file:** `datacenter_lcoe.py`  
+**Model version:** v5.4  
+**Code file:** `lcoe/` package (entry point `datacenter_lcoe.py`)  
 **Last verified:** June 2026  
-**All numerical values cross-checked against model output (`scratch/v53_run.log`)**
+**All numerical values cross-checked against model output (`scratch/v54_run.log`)**
+
+**v5.4 — battery augmentation + throughput cycle counting; no optimiser hysteresis.**
+The battery cost moves from lumpy full-system replacement to **capacity augmentation**
+(top up the faded energy/cell capacity each year — standard practice and cheaper; §6),
+and degradation is driven by **throughput equivalent-full-cycles** from dispatch rather
+than the old 2σ(SoC) proxy. The optimiser's path-regularisation penalty was also removed
+(it caused year-to-year hysteresis in the reported mix; §8.4). Net effect: storage is
+~30–35% cheaper, so RE LCOE falls a further ~8–15% and parity moves earlier — **EU 90% RE
+≈ 2033, 95% ≈ 2035; US now reaches parity at 70–80% RE (~2038–39)** though high-RE US
+still never beats cheap gas. Tables below are regenerated against this baseline.
 
 **v5.3 — per-technology cost of capital.** A single flat WACC is replaced by
 differentiated, technology-specific financing (§8.3): solar/wind **5.5%** (low-risk,
@@ -47,7 +57,7 @@ v5.1 right-sized the optimiser grid (§8.4) and added a boundary-binding guard.
 3. [Cost learning curves — Wright's Law](#3-cost-learning-curves--wrights-law)
 4. [Weather generation](#4-weather-generation)
 5. [Chronological dispatch](#5-chronological-dispatch)
-6. [Battery degradation and replacement NPV](#6-battery-degradation-and-replacement-npv)
+6. [Battery degradation, augmentation, and cost](#6-battery-degradation-augmentation-and-cost)
 7. [Gas backup cost and carbon trajectory](#7-gas-backup-cost-and-carbon-trajectory)
 8. [System LCOE and 3D optimisation](#8-system-lcoe-and-3d-optimisation)
 9. [Monte Carlo uncertainty](#9-monte-carlo-uncertainty)
@@ -66,7 +76,7 @@ This model computes the least-cost combination of solar PV, onshore wind, batter
 - Optimises over three continuous variables: solar overbuild $C_{\text{sol}}$, wind overbuild $C_{\text{win}}$, and battery storage duration $B$ — simultaneously for the first time in v4.
 - Projects cost trajectories from 2025 to 2040 using Wright's Law learning curves.
 - Quantifies uncertainty via Monte Carlo over both stochastic weather and capex parameters.
-- Accounts for battery degradation, mid-life replacement NPV, and depth-of-discharge effects.
+- Accounts for battery degradation via capacity augmentation (throughput-cycled), holding usable capacity at nameplate.
 - Defaults to a **firm (always-on)** datacenter with gas backup sized to 100% of load, and optionally models interruptible workloads that shed load only when the value of lost compute is below the gas variable cost (§5.5).
 - Covers two regions (US, EU) with region-specific resource, gas price/carbon, and battery soft-costs.
 - Uses dynamic backup generator capacity sizing (firm → 100% of load).
@@ -468,7 +478,7 @@ as "renewable," inflating the RE fraction by ~8 points.
 
 ---
 
-## 6. Battery Degradation and Replacement NPV
+## 6. Battery Degradation, Augmentation, and Cost
 
 ### 6.1 LFP degradation model
 
@@ -483,57 +493,59 @@ $$\text{cap}(t) = 1 - \delta_{\text{cal}} \cdot t - \delta_{\text{cyc}} \cdot N_
 | DoD exponent | $\beta$ | 0.60 | LFP Wöhler curve approximation |
 | Replacement threshold | | 80% | Industry warranty standard |
 
-**Note:** $\delta_{\text{cyc}} = 5\times10^{-5}$/FEC corresponds to 4,000 full cycles to 80% capacity — the standard LFP specification (CATL, EVE Energy datasheets).
+**Note:** $\delta_{\text{cyc}} = 5\times10^{-5}$/FEC corresponds to 4,000 full cycles to 80% capacity — the standard LFP specification (CATL, EVE Energy datasheets). *(v5.4: the DoD exponent $\beta$ and the 80% replacement threshold are retained in `BatteryParams` but no longer drive the cost — the augmentation model below holds capacity at nameplate, and cycling enters via throughput EFCs, not a Wöhler weighting.)*
 
-### 6.2 DoD-weighted effective FEC
+### 6.2 Throughput equivalent-full-cycles (v5.4)
 
-A cycle at depth-of-discharge $d$ does $d^\beta$ times the damage of a reference 100% DoD cycle (Wöhler curve approximation):
+Battery cycling is measured as **throughput equivalent full cycles** — the annual
+cell-discharge energy divided by the rated energy capacity — accumulated directly in
+dispatch:
 
-$$\text{FEC}_{\text{eff}} = d^\beta \qquad \text{(per actual cycle)}$$
+$$\dot{N}_{\text{FEC}} = \frac{1}{365}\cdot\frac{\sum_t d_t/\eta_{\text{dis}}}{\text{SoC}_{\max}}\ \ [\text{cycles/day}]$$
 
-The effective daily DoD is estimated from the hourly SoC variance accumulated during dispatch:
+where $d_t$ is the hour-$t$ discharge delivered to load. This is a standard, robust cycle
+count that replaces the v5 $2\sigma_{\text{SoC}}/\text{SoC}_{\max}$ heuristic; it is exact
+for symmetric daily cycling. (Full rainflow half-cycle counting with a Wöhler/DoD weight
+is the further refinement.)
 
-$$d_{\text{eff}} = \text{clip}\!\left(\frac{2 \cdot \sigma_{\text{SoC}}}{\text{SoC}_{\max}},\; 0,\; 1\right)$$
+### 6.3 Augmentation (v5.4 — replaces mid-life full replacement)
 
-where $\sigma_{\text{SoC}}$ is the hourly standard deviation of SoC over the year. This is computed during dispatch and passed to the cost function, replacing the fixed 1.5 FEC/day assumption of v3.
+Rather than replacing the whole system when capacity hits 80%, the operator **augments**:
+each year it adds enough **energy (cell)** capacity to offset that year's fade, holding
+usable capacity at nameplate — standard industry practice, and cheaper than full
+replacement. The power/BOS (inverter) component is built once (its mid-life replacement is
+folded into O&M). With fade rate $\delta = \delta_{\text{cal}} + \delta_{\text{cyc}}\cdot\dot N_{\text{FEC}}\cdot365$:
 
-### 6.3 Replacement interval
+$$\text{aug}_{\text{yr}} = \delta \cdot C_{\text{energy}}, \qquad C_{\text{energy}} = B\cdot c_{\text{energy}}\cdot10^3$$
 
-$$T_{\text{replace}} = \max\!\left(1,\; \frac{1 - \theta_{\text{replace}}}{\delta_{\text{cal}} + \delta_{\text{cyc}} \cdot \dot{N}_{\text{FEC}} \cdot 365}\right)$$
-
-**At default values** ($\dot{N}_{\text{FEC}} = 0.5$/day, which is the dispatch-average FEC assuming moderate DoD):
-
-$$T_{\text{replace}} = \frac{0.20}{0.020 + 5\times10^{-5} \times 182.5} = \frac{0.20}{0.0291} = 6.9 \text{ yr}$$
-
-This implies **two replacements** in a 20-year project (at ~yr 7 and ~yr 14), consistent with industry expectations for stationary LFP.
+Augmentation is priced at today's capex (future cells are cheaper, so this is conservative).
 
 ### 6.4 Cost per installation
 
-$$C_{\text{one}} = B \cdot c_{\text{energy}} \cdot 10^3 + P_{\text{batt}} \cdot c_{\text{power}} \cdot 10^3 \quad [\$/\text{MW-load}]$$
+$$C_{\text{one}} = \underbrace{B \cdot c_{\text{energy}} \cdot 10^3}_{C_{\text{energy}}\ (\text{augmented})} + \underbrace{P_{\text{batt}} \cdot c_{\text{power}} \cdot 10^3}_{\text{power/BOS, built once}} \quad [\$/\text{MW-load}]$$
 
 Power capex scales with $P_{\text{batt}} = \min(1, 4/B)$, not always 1 MW — consistent with the dispatch de-rating.
 
-### 6.5 Replacement NPV and annualised cost
+### 6.5 Augmentation NPV and annualised cost
 
-$$\text{NPV}_{\text{batt}} = C_{\text{one}} \cdot \left[1 + \sum_{k=1}^{\lfloor n / T_{\text{replace}} \rfloor} (1+r)^{-k \cdot T_{\text{replace}}}\right]$$
+$$\text{NPV}_{\text{batt}} = C_{\text{one}} + \text{aug}_{\text{yr}} \cdot \sum_{t=1}^{n}(1+r)^{-t}
+= C_{\text{one}} + \delta\, C_{\text{energy}}\cdot \frac{1-(1+r)^{-n}}{r}$$
 
-$$C_{\text{batt}}^{\text{ann}} = \text{NPV}_{\text{batt}} \cdot \text{CRF}(r, n) + C_{\text{one}} \cdot \phi_{\text{OM}}$$
-
-$$c_{\text{batt}} = C_{\text{batt}}^{\text{ann}} / 8760 \quad [\$/\text{MWh-load}]$$
+$$C_{\text{batt}}^{\text{ann}} = \text{NPV}_{\text{batt}} \cdot \text{CRF}(r, n) + C_{\text{one}} \cdot \phi_{\text{OM}}, \qquad c_{\text{batt}} = C_{\text{batt}}^{\text{ann}} / 8760$$
 
 where $\phi_{\text{OM}} = 0.015$ (1.5%/yr O&M) and $\text{CRF}(0.07, 20) = 0.0944$.
 
-**Verified delivered battery costs (2025, 0.5 FEC/day, v5 consistent basis):**
+**Verified delivered battery costs (2025, 0.5 EFC/day, v5.4 augmentation):**
 
 | Storage duration | Delivered cost (US) | Delivered cost (EU) |
 |-----------------|--------------------|--------------------|
-| 2h | $11.8/MWh | $12.6/MWh |
-| 4h | $20.2/MWh | $21.0/MWh |
-| 8h | $35.5/MWh | $35.9/MWh |
-| 12h | $51.9/MWh | $52.2/MWh |
-| 24h | $102.1/MWh | $102.3/MWh |
+| 2h | $7.4/MWh | $7.9/MWh |
+| 4h | $13.1/MWh | $13.6/MWh |
+| 8h | $23.6/MWh | $23.9/MWh |
+| 12h | $34.7/MWh | $34.9/MWh |
+| 24h | $68.6/MWh | $68.7/MWh |
 
-With the v5 region-invariant energy component, US and EU storage costs are now nearly identical (EU marginally higher via the power/BOS premium), converging at long durations where energy dominates — versus v4, where the EU column was ~2× cheaper. Consistent with NREL ATB 2024 and Ember 2025 LCOS ranges.
+These are ~30–35% below the v5.3 full-replacement figures (e.g. 4h US $20.2 → $13.1), because augmentation refreshes only the faded cell fraction rather than the entire system. US and EU remain nearly identical (region-invariant cells; EU marginally higher via the power/BOS premium). Consistent with NREL ATB 2024 augmentation methodology and Ember 2025 LCOS ranges.
 
 ---
 
@@ -672,6 +684,13 @@ v5.1 fixes this two ways:
    whenever an optimum lands within one grid-step of a max bound, so a binding cap (which
    would *understate* cost) can never silently recur. The default suite triggers no warnings.
 
+**No path-regularisation hysteresis (v5.4).** Earlier versions added a small penalty pulling
+each year's build toward the previous year's (`0.001·‖x−x_{prev}‖²`) to stabilise the mix in
+the flat cost valley. It introduced year-to-year *hysteresis* in the reported optimal mix
+(path dependence), so it was removed; `prev_x` is now used only as a warm-start candidate,
+which speeds convergence without biasing the objective. Cost impact is sub-$1/MWh; the optimal-mix
+trajectory is now path-independent.
+
 ### 8.5 Capex vs opex decomposition
 
 `delivered_cost_split` decomposes the delivered cost **per factor** into capex and opex,
@@ -762,8 +781,8 @@ The factor $-\sigma^2/2$ makes the draws mean-preserving: $E[\tilde{c}] = c$. Th
 ## 11. Key Results
 
 Headline = **FIRM (always-on)** workload: gas backup sized to 100% of load, nothing shed,
-capped opex. All values from `scratch/v53_run.log` (June 2026; 50 MC weather years, 21³ grid,
-Dunkelflaute weather, consistent battery basis, **per-tech WACC v5.3**). Premium/AI workloads
+capped opex. All values from `scratch/v54_run.log` (June 2026; 50 MC weather years, 21³ grid,
+Dunkelflaute weather, per-tech WACC, **v5.4 battery augmentation**). Premium/AI workloads
 collapse to firm under the economic shed test, so these are the relevant numbers for any
 valuable datacenter. (Tables are regenerated from the export via `tools/regen_doc_tables.py`.)
 
@@ -771,39 +790,40 @@ valuable datacenter. (Tables are regenerated from the export via `tools/regen_do
 
 | RE target | 2025 ($/MWh) | 2030 | 2035 | 2040 | vs gas 2025 | Crossover |
 |-----------|-------------|------|------|------|-------------|-----------|
-| 70% | 88.5 | 68.3 | 57.0 | 49.1 | +92% | >2040 |
-| 80% | 105.5 | 76.1 | 60.0 | 49.5 | +129% | >2040 |
-| 85% | 124.2 | 90.3 | 70.9 | 57.6 | +170% | >2040 |
-| 90% | 176.9 | 137.8 | 109.9 | 90.3 | +284% | >2040 |
-| 95% | 192.9 | 154.9 | 133.0 | 117.6 | +319% | >2040 |
+| 70% | 79.2 | 61.9 | 51.1 | 44.2 | +72% | ~2038 |
+| 80% | 91.1 | 66.6 | 53.1 | 44.2 | +98% | ~2039 |
+| 85% | 110.0 | 80.9 | 64.0 | 52.3 | +139% | >2040 |
+| 90% | 161.8 | 128.4 | 103.0 | 85.0 | +251% | >2040 |
+| 95% | 178.4 | 145.3 | 126.2 | 112.2 | +287% | >2040 |
 | **Gas** | **46.1** | **46.1** | **46.1** | **46.1** | — | — |
 
-US RE never beats gas within the horizon — cheap untaxed gas ($4/MMBtu → ~$46/MWh even at a
-9% WACC) is a very low baseline, and high-RE needs heavy wind overbuild (~7–11×) to ride out
-multi-day lulls. v5.3's cheaper RE financing narrows the gap (90% RE: +316% → +284% vs gas)
-but does not close it.
+High-RE US still never beats gas within the horizon — cheap untaxed gas ($4/MMBtu → ~$46/MWh
+even at a 9% WACC) is a very low baseline, and high-RE needs heavy wind overbuild (~7–11×) to
+ride out multi-day lulls. But with v5.4's cheaper storage, **moderate-RE US now does reach
+parity** — 70% ≈ 2038, 80% ≈ 2039 — as solar/wind/battery learning carries 70–80% builds below
+$46 by the late 2030s. 90%+ remains >2040.
 
 ### Europe — Firm (always-on)
 
 | RE target | 2025 ($/MWh) | 2030 | 2035 | 2040 | vs gas 2025 | Crossover |
 |-----------|-------------|------|------|------|-------------|-----------|
-| 70% | 114.2 | 95.7 | 87.9 | 79.8 | +0% | **~2025** |
-| 80% | 130.5 | 101.6 | 88.8 | 80.0 | +15% | **~2027** |
-| 85% | 148.2 | 114.0 | 98.0 | 86.9 | +30% | **~2029** |
-| 90% | 196.6 | 159.6 | 138.9 | 119.0 | +73% | **~2034** |
-| 95% | 215.0 | 174.1 | 156.6 | 140.5 | +89% | **~2036** |
+| 70% | 104.2 | 87.9 | 80.8 | 74.4 | −8% | **~2025** |
+| 80% | 115.4 | 92.1 | 81.8 | 74.5 | +1% | **~2025** |
+| 85% | 133.6 | 104.3 | 90.9 | 81.5 | +17% | **~2027** |
+| 90% | 181.7 | 150.1 | 131.8 | 113.6 | +60% | **~2033** |
+| 95% | 199.9 | 164.7 | 149.6 | 135.0 | +76% | **~2035** |
 | **Gas** | **113.8** | **125.2** | **148.3** | **162.6** | — | — |
 
 EU gas is expensive and rising (carbon → logistic path toward $200/tCO₂). An always-on RE
-datacenter beats gas from ~2025 at 70% RE; **90% RE reaches parity ~2034, 95% ~2036.**
+datacenter beats gas from ~2025 at 70–80% RE; **90% RE reaches parity ~2033, 95% ~2035.**
 Note how much later these still are than early versions: v4 claimed "90% parity Q2 2025." The
-move out to the mid-2030s is the cumulative effect of every honesty fix — no free load-shedding,
-realistic batteries, multi-day Dunkelflaute, a properly-resolved optimiser, and (largest
-here) **no free demand-deferral**: an always-on datacenter must build enough firm capacity to
-ride out week-long lulls. v5.3's per-tech WACC (cheaper RE, dearer gas) then pulls parity ~1 yr
-earlier than v5.2 (90%: 2035 → 2034; 95%: 2040 → 2036).
+move out to the early-to-mid 2030s is the cumulative effect of every honesty fix — no free
+load-shedding, multi-day Dunkelflaute, a properly-resolved optimiser, and (largest here) **no
+free demand-deferral**: an always-on datacenter must build enough firm capacity to ride out
+week-long lulls. v5.3's per-tech WACC and v5.4's cheaper (augmented) storage then pull parity
+progressively earlier (90% RE: v5.2 2035 → v5.3 2034 → v5.4 2033).
 
-**Optimal EU 90% RE build (2025):** ≈ 11.0× solar + 10.0× wind + 6h storage. Note the huge
+**Optimal EU 90% RE build (2025):** ≈ 10.9× solar + 10.0× wind + 6h storage. Note the huge
 generation overbuild but only ~6h battery — see the next subsection.
 
 ### Why so much overbuild but only ~6h of battery?
@@ -870,9 +890,10 @@ absolute LCOE as indicative; the *shape* of the trade-off surface is the point.
 ### Accuracy summary — what to trust
 
 Treat this as a **stylised techno-economic model: trust directional comparisons, not absolute
-numbers to better than ~±20–30%.** Robust conclusions: cheap untaxed US gas is very hard to
-beat; carbon-priced EU gas is beatable, with parity moving from ~2025–2027 (70–80% RE) to ~2034–2036
-(90–95%); high-RE economics are overbuild-and-gas-dominated, not battery-dominated; and demand
+numbers to better than ~±20–30%.** Robust conclusions: cheap untaxed US gas is hard to beat at
+high RE (90%+ never crosses), though moderate-RE US reaches parity by the late 2030s; carbon-priced
+EU gas is beatable, with parity moving from ~2025 (70–80% RE) to ~2033–2035 (90–95%);
+high-RE economics are overbuild-and-gas-dominated, not battery-dominated; and demand
 flexibility only helps when compute is worth less than gas — i.e. rarely for premium AI. Not to
 be trusted as precise: specific parity *years* and $/MWh (synthetic uncalibrated weather, my own
 battery-cost basis, learning-rate extrapolation to 2040, a single site). The biggest lever to

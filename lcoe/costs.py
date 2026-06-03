@@ -120,7 +120,7 @@ def carbon_price(gas: GasParams, year_index: int) -> float:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. BATTERY DEGRADATION  (DoD-weighted)
+# 4. BATTERY COST  (augmentation model, throughput-cycled)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def battery_annualised_cost(
@@ -133,9 +133,9 @@ def battery_annualised_cost(
     effective_fec_per_day: float = 0.5,
 ) -> float:
     """
-    Annualised battery cost per MW of load including mid-life replacements.
+    Annualised battery cost per MW of load including capacity augmentation.
 
-    effective_fec_per_day: DoD-weighted FEC/day from dispatch (replaces fixed 1.5).
+    effective_fec_per_day: throughput equivalent-full-cycles/day from dispatch.
     Thin wrapper over `battery_cost_split` (single source of the cost formula).
     """
     capex, opex = battery_cost_split(batt, storage_hours, capex_kwh, capex_kw,
@@ -145,21 +145,30 @@ def battery_annualised_cost(
 
 def battery_cost_split(batt, storage_hours, capex_kwh, capex_kw, r, n_yr,
                        effective_fec_per_day=0.5):
-    """(capex, opex) split of the annualised battery cost: capital recovery
-    (incl. mid-life replacements) vs the fixed O&M term. The single source of the
-    battery cost formula — `battery_annualised_cost` returns the sum of the two."""
+    """
+    (capex, opex) split of the annualised battery cost. The single source of the
+    battery cost formula — `battery_annualised_cost` returns the sum of the two.
+
+    Augmentation model (v5.4): rather than replacing the whole system at end-of-life,
+    the operator tops up the **energy (cell)** capacity each year to offset fade,
+    holding usable capacity at nameplate — standard industry practice and cheaper
+    than full replacement. Annual augmentation = fade rate × energy capex, where the
+    fade rate is calendar + cycle (throughput EFCs from dispatch). The power/BOS
+    component is built once (inverter mid-life replacement is folded into O&M).
+    Augmentation is priced at today's capex (future cells are cheaper, so this is
+    conservative).
+    """
     if storage_hours <= 0:
         return 0.0, 0.0
     fec_per_yr     = effective_fec_per_day * 365
     total_deg_rate = batt.calendar_deg_per_yr + batt.cycle_deg_per_fec * fec_per_yr
-    replace_interval = max(1.0, (1 - batt.replace_threshold) / total_deg_rate)
     power_rating = 1.0 if storage_hours <= 4.0 else min(1.0, 4.0 / storage_hours)
-    cost_one = storage_hours * capex_kwh * 1e3 + power_rating * capex_kw * 1e3
-    npv = cost_one
-    t = replace_interval
-    while t < n_yr:
-        npv += cost_one / (1 + r) ** t
-        t += replace_interval
+    energy_capex = storage_hours * capex_kwh * 1e3     # cells — degrade, augmented
+    power_capex  = power_rating * capex_kw * 1e3       # inverter/BOS — built once
+    cost_one = energy_capex + power_capex
+    # NPV = initial build + discounted stream of annual energy augmentation
+    annuity = (1.0 - (1.0 + r) ** (-n_yr)) / r if r > 0 else float(n_yr)
+    npv = cost_one + total_deg_rate * energy_capex * annuity
     return npv * crf(r, n_yr), cost_one * batt.om_frac_capex
 
 
