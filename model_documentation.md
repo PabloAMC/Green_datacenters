@@ -220,9 +220,12 @@ below.
 **What it shows.** Grid+PPA sits well below the off-grid high-RE optimum in both
 regions and below carbon-priced EU off-grid gas — i.e. **going off-grid is itself a
 cost premium**, paid for siting independence. This context was missing when off-grid RE
-was compared only to off-grid gas. **Caveat:** this represents *annual-volumetric* RE
-matching (RECs/PPA netted over the year), **not** hour-by-hour 24/7 carbon-free energy;
-true 100% 24/7 CFE on the grid would cost more and is not modelled here.
+was compared only to off-grid gas. The base PPA line represents *annual-volumetric* RE
+matching (RECs/PPA netted over the year). A **second reference, Grid + 24/7 CFE**
+(`grid_cfe_trajectory`), adds a flat `cfe_premium_mwh` (US $40, EU $55) for hour-by-hour
+carbon-free matching — the Google/Microsoft target, which needs firm-clean / storage /
+deep overbuild to cover every hour and so costs more (US ≈$115→$82, EU ≈$172→$119 over
+2025→2040). Both are stylised, adjustable reference lines, never part of the optimisation.
 
 ---
 

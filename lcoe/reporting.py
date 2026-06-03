@@ -24,6 +24,10 @@ def print_summary(results, region="US"):
         gp = results["grid_ppa"]
         ref = "  ".join(f"{y}:${gp[y-yrs[0]]:.0f}" for y in milestones)
         print(f"  Grid+RE PPA reference (on-grid alt., $/MWh):  {ref}")
+    if "grid_cfe" in results:
+        gc = results["grid_cfe"]
+        ref = "  ".join(f"{y}:${gc[y-yrs[0]]:.0f}" for y in milestones)
+        print(f"  Grid 24/7 CFE reference (hourly clean, $/MWh): {ref}")
     print(f"{'═'*102}")
     for R in sorted(results["scenarios"].keys()):
         sc = results["scenarios"][R]
@@ -93,6 +97,8 @@ def export_results(results: Dict, region: str, prefix: str,
     smr = [float(v) for v in results["lcoe_smr"]]
     ppa = ([float(v) for v in results["grid_ppa"]] if "grid_ppa" in results
            else [None] * len(yrs))
+    cfe = ([float(v) for v in results["grid_cfe"]] if "grid_cfe" in results
+           else [None] * len(yrs))
     Rs  = sorted(results["scenarios"].keys())
 
     csv_path  = os.path.join(outdir, f"{prefix}_results.csv")
@@ -100,7 +106,8 @@ def export_results(results: Dict, region: str, prefix: str,
 
     # ── CSV (long / tidy format) ────────────────────────────────────────────────
     cols = (["region", "re_target", "year"]
-            + [name for name, _ in _EXPORT_FIELDS] + ["gas_pure", "smr", "grid_ppa"])
+            + [name for name, _ in _EXPORT_FIELDS]
+            + ["gas_pure", "smr", "grid_ppa", "grid_cfe"])
     with open(csv_path, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(cols)
@@ -112,7 +119,8 @@ def export_results(results: Dict, region: str, prefix: str,
                     arr = sc.get(key)
                     row.append(f"{float(arr[i]):.4f}" if arr is not None else "")
                 row += [f"{gas[i]:.4f}", f"{smr[i]:.4f}",
-                        f"{ppa[i]:.4f}" if ppa[i] is not None else ""]
+                        f"{ppa[i]:.4f}" if ppa[i] is not None else "",
+                        f"{cfe[i]:.4f}" if cfe[i] is not None else ""]
                 w.writerow(row)
 
     # ── JSON (structured, with metadata) ────────────────────────────────────────
@@ -125,6 +133,7 @@ def export_results(results: Dict, region: str, prefix: str,
         "gas_pure": gas,
         "smr": smr,
         "grid_ppa": ppa if "grid_ppa" in results else None,
+        "grid_cfe": cfe if "grid_cfe" in results else None,
         "scenarios": {
             f"{R:.2f}": {name: [round(float(v), 4) for v in results["scenarios"][R][key]]
                          for name, key in _EXPORT_FIELDS

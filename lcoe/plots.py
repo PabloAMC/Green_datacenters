@@ -19,7 +19,7 @@ except ImportError:
 # ─────────────────────────────────────────────────────────────────────────────
 
 C_OPT = "#3A86FF"; C_GAS = "#6B705C"; C_BATT = "#9D4EDD"; C_SMR = "#E71D36"
-C_SOL = "#FF9F1C"; C_WIN = "#2EC4B6"; C_PPA = "#06D6A0"
+C_SOL = "#FF9F1C"; C_WIN = "#2EC4B6"; C_PPA = "#06D6A0"; C_CFE = "#118AB2"
 REFS  = "Lazard v18 · Way et al. Joule 2022 · NREL ATB 2024 · EU ETS · IPCC AR6"
 PALETTE = ["#3A86FF", "#FF9F1C", "#2EC4B6", "#9D4EDD", "#FB5607", "#E71D36"]
 
@@ -52,6 +52,9 @@ def plot_cost_trajectories(results, region="US"):
     if "grid_ppa" in results:
         ax.plot(yrs, results["grid_ppa"], color=C_PPA, lw=2, ls=":",
                 label=results["grid_ppa_name"])
+    if "grid_cfe" in results:
+        ax.plot(yrs, results["grid_cfe"], color=C_CFE, lw=2, ls=(0, (1, 1)),
+                label=results["grid_cfe_name"])
     ax.set(xlabel="Year", ylabel="Delivered cost ($/MWh)",
            title=f"Delivered cost trajectory — {region}",
            xlim=(yrs[0], yrs[-1]), ylim=(0, None))
@@ -77,6 +80,9 @@ def plot_reliability_sensitivity(results, target_year=2030, region="US"):
     if "grid_ppa" in results:
         gp = results["grid_ppa"][idx]
         ax.axhline(gp, color=C_PPA, ls=":", lw=2, label=f"Grid+RE PPA (${gp:.0f}/MWh)")
+    if "grid_cfe" in results:
+        gc = results["grid_cfe"][idx]
+        ax.axhline(gc, color=C_CFE, ls=(0, (1, 1)), lw=2, label=f"Grid 24/7 CFE (${gc:.0f}/MWh)")
     ax.set(xlabel="Renewable fraction (%)", ylabel="Delivered cost ($/MWh)",
            title=f"Cost vs. RE fraction at {target_year} — {region}",
            ylim=(0, None))

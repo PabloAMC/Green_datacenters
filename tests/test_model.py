@@ -74,6 +74,17 @@ def test_gas_pure_lcoe():
     assert abs(m.gas_pure_lcoe(m.GAS, 0, 0.07) - 43.7) < 0.1
 
 
+def test_grid_cfe_above_ppa_by_premium():
+    """24/7 CFE reference = annual-matching PPA line + a flat hourly-matching premium."""
+    lcoe_sol = m.wright_law(m.SOLAR.lcoe_today, m.SOLAR.cumulative_gw_2025,
+                            m.cumulative_capacity(m.SOLAR, 15), m.SOLAR.learning_rate)
+    ppa = m.grid_ppa_trajectory(m.GRID_PPA, lcoe_sol)
+    cfe = m.grid_cfe_trajectory(m.GRID_PPA, lcoe_sol)
+    import numpy as np
+    assert np.allclose(cfe - ppa, m.GRID_PPA.cfe_premium_mwh)
+    assert all(cfe > ppa)
+
+
 def test_per_tech_wacc_defaults_and_direction():
     # the chosen differentiated scheme
     assert m.SOLAR.wacc == 0.055 and m.WIND.wacc == 0.055

@@ -122,13 +122,17 @@ class GridPPAParams:
     is an adjustable assumption, grounded in the LevelTen PPA Price Index, Lazard
     v18, and typical large-C&I network tariffs.
 
-    Note: this represents *annual-volumetric* RE matching, not hour-by-hour 24/7
-    carbon-free energy; true 100% 24/7 CFE on the grid would cost more (see docs).
+    Note: the base line represents *annual-volumetric* RE matching. A second
+    reference, **24/7 CFE** (hour-by-hour carbon-free matching, the Google/Microsoft
+    target), adds `cfe_premium_mwh` on top — the extra cost of matching demand with
+    clean supply in *every* hour (firm clean / storage / deep overbuild). Both are
+    reference lines, never part of the optimisation.
     """
     name: str = "Grid + RE PPA"
     ppa_energy_today: float = 45.0     # $/MWh contracted RE energy (LevelTen index, US)
     grid_delivery_mwh: float = 22.0    # $/MWh T&D / network charge, large C&I
     firming_premium_mwh: float = 8.0   # $/MWh balancing/standby to firm PPA to 24/7
+    cfe_premium_mwh: float = 40.0      # $/MWh extra for 24/7 hourly CFE vs annual matching
 
 
 @dataclass
@@ -270,7 +274,8 @@ SMR_EU = SMRParams(name="SMR (EU)", lcoe_foak=140.0, lcoe_noak=85.0, years_to_no
 # US (pricier PPAs, higher network tariffs), mirroring the off-grid cost gap.
 GRID_PPA    = GridPPAParams()
 GRID_PPA_EU = GridPPAParams(name="Grid + RE PPA (EU)", ppa_energy_today=72.0,
-                            grid_delivery_mwh=33.0, firming_premium_mwh=12.0)
+                            grid_delivery_mwh=33.0, firming_premium_mwh=12.0,
+                            cfe_premium_mwh=55.0)
 
 SYSTEM    = SystemParams()
 SYSTEM_EU = SystemParams(

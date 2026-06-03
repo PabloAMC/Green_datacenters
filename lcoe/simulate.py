@@ -12,8 +12,8 @@ from .params import (SystemParams, BatteryParams, GasParams, SMRParams,
                      SOLAR, WIND, BATTERY_US, GAS, SMR, ENTERPRISE,
                      SYSTEM, FIRM, REGIONS, _sys_with)
 from .costs import (cumulative_capacity, wright_law, rewacc_lcoe,
-                    smr_trajectory, grid_ppa_trajectory, gas_pure_lcoe,
-                    battery_annualised_cost)
+                    smr_trajectory, grid_ppa_trajectory, grid_cfe_trajectory,
+                    gas_pure_lcoe, battery_annualised_cost)
 from .dispatch import ChronologicalSimulator
 from .optimize import optimal_cost_3d, delivered_cost_split
 from .reporting import print_summary, export_results
@@ -75,6 +75,8 @@ def run_simulation(
     if grid_ppa is not None:
         results["grid_ppa"] = grid_ppa_trajectory(grid_ppa, lcoe_solar)
         results["grid_ppa_name"] = grid_ppa.name
+        results["grid_cfe"] = grid_cfe_trajectory(grid_ppa, lcoe_solar)
+        results["grid_cfe_name"] = "Grid + 24/7 CFE"
 
     for R in reliabilities:
         n_yr = years + 1

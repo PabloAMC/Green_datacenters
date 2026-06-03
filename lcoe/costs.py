@@ -80,6 +80,15 @@ def grid_ppa_trajectory(ppa: GridPPAParams, lcoe_solar: np.ndarray) -> np.ndarra
             + ppa.grid_delivery_mwh + ppa.firming_premium_mwh)
 
 
+def grid_cfe_trajectory(ppa: GridPPAParams, lcoe_solar: np.ndarray) -> np.ndarray:
+    """
+    Delivered $/MWh for grid-connected **24/7 carbon-free energy** matching (every
+    hour matched with clean supply), = the annual-matching PPA line plus a flat
+    `cfe_premium_mwh` for hourly matching. Reference only; stylised & adjustable.
+    """
+    return grid_ppa_trajectory(ppa, lcoe_solar) + ppa.cfe_premium_mwh
+
+
 def carbon_price(gas: GasParams, year_index: int) -> float:
     """
     Carbon price at year t under three trajectory modes.

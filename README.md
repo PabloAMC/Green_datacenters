@@ -90,7 +90,7 @@ Inherited from v4: 3D optimisation over (solar, wind, battery); Gaussian-copula 
 
 From `scratch/v53_run.log` (tables regenerable via `tools/regen_doc_tables.py`). These are the relevant numbers for any valuable datacenter (premium/AI workloads never shed and collapse to firm). Gas baseline: US flat ~$46/MWh; EU rising from $114 (2025) to $163 (2040) as carbon prices climb.
 
-> **On-grid reference (new).** Every trajectory/reliability figure and the summary now also plot a **Grid + renewable-PPA** line — the realistic alternative of staying on the grid and signing a renewable PPA (all-in ≈ \$75/MWh US, \$117/MWh EU in 2025, declining with the solar learning curve). It sits *below* the off-grid high-RE optimum in both regions, making explicit that **going off-grid is itself a cost premium**. This is annual-volumetric RE matching, not 24/7 CFE. Reference only — not part of the optimisation.
+> **On-grid reference (new).** Every trajectory/reliability figure and the summary now also plot a **Grid + renewable-PPA** line — the realistic alternative of staying on the grid and signing a renewable PPA (all-in ≈ \$75/MWh US, \$117/MWh EU in 2025, declining with the solar learning curve). It sits *below* the off-grid high-RE optimum in both regions, making explicit that **going off-grid is itself a cost premium**. A second line, **Grid + 24/7 CFE**, adds a premium for hour-by-hour carbon-free matching (≈\$115/MWh US, \$172/MWh EU in 2025). Both are annual-vs-hourly reference lines — not part of the optimisation.
 
 ### US — 90% RE
 *   **2025 LCOE:** $176.9/MWh; **2040:** $90.3/MWh. **Parity: >2040** at every RE target.
