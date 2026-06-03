@@ -61,6 +61,9 @@ python datacenter_lcoe.py --region us --re 0.9 --resource good      # single run
 
 # Tornado: which assumptions most move RE-vs-gas competitiveness (parity gap) → figure
 python datacenter_lcoe.py --tornado --region eu --re 0.9
+
+# Green-hydrogen firming instead of natural gas (zero combustion carbon, pricey fuel)
+python datacenter_lcoe.py --region eu --re 0.9 --firming h2
 ```
 Workload presets (`--workload`): `firm` (always-on, 0% shed) · `enterprise` (5% / $2500) · `training` (40% / $900) · `interruptible` (60% / $150) · `best-effort` (90% / $40). `--interruptible` = *fraction of load you may shed*; `--shed-penalty` = *value of the lost compute, $/MWh* (high = firm; the model only sheds when this is below the gas variable cost). Advanced: `--grid-steps`, `--mc`, `--years`, `--seed`.
 

@@ -6,7 +6,7 @@ import os
 import matplotlib.pyplot as plt
 
 from .params import (REGIONS, WORKLOAD_PRESETS, WorkloadProfile,
-                     AI_TRAINING, RESOURCE_PRESETS)
+                     AI_TRAINING, RESOURCE_PRESETS, FIRMING_PRESETS)
 from .simulate import run_region_key, run_full_suite
 from .analysis import run_flex_sensitivity, run_resource_sensitivity, run_tornado
 from .plots import plot_flex_heatmap, plot_tornado
@@ -15,7 +15,7 @@ from .plots import plot_flex_heatmap, plot_tornado
 def build_arg_parser():
     import argparse
     p = argparse.ArgumentParser(
-        description="Off-grid datacenter LCOE model (v5.2). No args → firm US+EU suite.")
+        description="Off-grid datacenter LCOE model (v5.4). No args → firm US+EU suite.")
     p.add_argument("--region", choices=list(REGIONS), help="us | eu")
     p.add_argument("--workload", choices=list(WORKLOAD_PRESETS),
                    help="flexibility preset for a single-scenario run "
@@ -37,6 +37,9 @@ def build_arg_parser():
     p.add_argument("--resource", choices=["default", "good"],
                    help="resource quality for a single-scenario run: conservative "
                         "default site, or a modern well-sited 'good' resource")
+    p.add_argument("--firming", choices=list(FIRMING_PRESETS), default="gas",
+                   help="firming resource: 'gas' (default) or 'h2' (zero-carbon "
+                        "green-hydrogen turbine, pricey fuel)")
     p.add_argument("--resource-sweep", action="store_true",
                    help="compare default vs good-site resource (LCOE + parity table)")
     p.add_argument("--tornado", action="store_true",
@@ -106,7 +109,8 @@ def main(argv=None):
 
     # Single custom scenario
     if args.region or args.workload or args.interruptible is not None \
-            or args.shed_penalty is not None or args.re or args.design_p90 or args.resource:
+            or args.shed_penalty is not None or args.re or args.design_p90 \
+            or args.resource or args.firming != "gas":
         region = args.region or "us"
         wl = WORKLOAD_PRESETS[args.workload] if args.workload else AI_TRAINING
         if args.interruptible is not None or args.shed_penalty is not None:
@@ -123,10 +127,12 @@ def main(argv=None):
         mi = mw = None
         if args.resource:
             mi, mw = RESOURCE_PRESETS[region][args.resource]
+        gas_override = FIRMING_PRESETS[args.firming]   # None → region default gas
         prefix = f"cli_{region}_{args.workload or 'training'}"
         run_region_key(region, wl, reliabilities, prefix=prefix,
                        sys_overrides=sys_ov or None, seed=args.seed,
-                       design_p90=args.design_p90, mean_irr=mi, mean_wind_ms=mw)
+                       design_p90=args.design_p90, mean_irr=mi, mean_wind_ms=mw,
+                       gas=gas_override)
         print(f"\nDone — figures saved with prefix figs/{prefix}_*.png")
         return
 

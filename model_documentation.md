@@ -565,6 +565,16 @@ where $K_{\text{gas}}$ is the peak backup capacity factor (maximum hourly residu
 
 **Delivered gas cost** ($/MWh of total load): $c_{\text{gas}} = \text{LCOE}_g \cdot f_{\text{gas}}$
 
+**Green-hydrogen firming (opt-in, `--firming h2`).** The firming block can instead burn
+purchased **green hydrogen** in an H₂-capable turbine — economically "a gas plant with
+pricey, zero-carbon fuel", so it reuses the entire formula above with $\varepsilon_g=0$
+(no combustion CO₂), a higher fuel price ($p_{\text{gas}}\approx\$35$/MMBtu ≈ \$4/kg LHV),
+and a modestly higher turbine capex. It trades EU carbon exposure for expensive fuel: at
+EU 90% RE the 100%-firming reference is ≈\$250/MWh (flat, carbon-free) vs natural gas's
+\$114→\$163 rising path, but because the firm system burns it only ~10% of hours, an RE+H₂
+build still lands well below pure H₂ and decarbonises the residual. Stylised & adjustable
+(`GAS_H2`).
+
 **Pure gas reference** (CCGT at 85% CF, verified values):
 
 | | US | EU 2025 | EU 2030 | EU 2035 |

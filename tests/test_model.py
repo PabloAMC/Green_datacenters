@@ -74,6 +74,16 @@ def test_gas_pure_lcoe():
     assert abs(m.gas_pure_lcoe(m.GAS, 0, 0.07) - 43.7) < 0.1
 
 
+def test_h2_firming_preset():
+    """Green-H2 firming: zero combustion carbon, pricier fuel, flat over time."""
+    assert m.GAS_H2.carbon_intensity_ccgt == 0.0 and m.GAS_H2.carbon_intensity_ocgt == 0.0
+    h2_2025 = m.gas_pure_lcoe(m.GAS_H2, 0, m.GAS_H2.wacc)
+    h2_2040 = m.gas_pure_lcoe(m.GAS_H2, 15, m.GAS_H2.wacc)
+    assert h2_2025 > m.gas_pure_lcoe(m.GAS, 0, m.GAS.wacc)   # pricier zero-carbon fuel
+    assert abs(h2_2025 - h2_2040) < 1e-6                     # flat: no carbon escalation
+    assert m.FIRMING_PRESETS["gas"] is None and m.FIRMING_PRESETS["h2"] is m.GAS_H2
+
+
 def test_grid_cfe_above_ppa_by_premium():
     """24/7 CFE reference = annual-matching PPA line + a flat hourly-matching premium."""
     lcoe_sol = m.wright_law(m.SOLAR.lcoe_today, m.SOLAR.cumulative_gw_2025,

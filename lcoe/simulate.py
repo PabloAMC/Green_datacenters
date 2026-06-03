@@ -216,15 +216,17 @@ def run_region(region, solar, wind, battery, gas, smr, sys, workload,
 
 def run_region_key(region_key, workload, reliabilities, prefix,
                    sys_overrides=None, seed=42, design_p90=False,
-                   mean_irr=None, mean_wind_ms=None):
+                   mean_irr=None, mean_wind_ms=None, gas=None):
     """Run a region (from REGIONS) with a chosen workload; thin wrapper over run_region.
 
     `mean_irr` / `mean_wind_ms` override the region's default resource (used by the
-    resource-quality sensitivity); `design_p90` adds the robustness-design series."""
+    resource-quality sensitivity); `design_p90` adds the robustness-design series;
+    `gas` overrides the firming resource (e.g. green-H2 via --firming h2)."""
     cfg = REGIONS[region_key]
     sys = _sys_with(cfg["sys"], **sys_overrides) if sys_overrides else cfg["sys"]
     label = f"{cfg['label']} ({workload.name})"
-    return run_region(label, cfg["solar"], cfg["wind"], cfg["battery"], cfg["gas"],
+    return run_region(label, cfg["solar"], cfg["wind"], cfg["battery"],
+                      cfg["gas"] if gas is None else gas,
                       cfg["smr"], sys, workload,
                       cfg["mean_irr"] if mean_irr is None else mean_irr,
                       cfg["mean_wind_ms"] if mean_wind_ms is None else mean_wind_ms,

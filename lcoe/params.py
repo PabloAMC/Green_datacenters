@@ -260,6 +260,23 @@ GAS_EU = GasParams(
     carbon_trajectory_steepness=0.35,
 )
 
+# Green-hydrogen firming (opt-in alternative to gas, via --firming h2). Purchased
+# green H2 burned in an H2-capable turbine: **zero combustion carbon**, but the fuel
+# is expensive and uncertain (~$4/kg ≈ $35/MMBtu LHV) and the turbine + on-site H2
+# handling cost more than a gas peaker. Reuses the entire gas dispatch/cost path —
+# it is, economically, "a gas plant with pricey zero-carbon fuel". Region-invariant
+# (H2 is a globally-traded commodity); every figure is adjustable.
+GAS_H2 = GasParams(
+    name="Green H2 firming",
+    gas_price_mmbtu=35.0,          # ≈ $4/kg green H2 (LHV); adjustable
+    ccgt_capex_kw=1300.0,          # H2-ready turbine + H2 handling (vs 1100 NG)
+    ocgt_capex_kw=600.0,           # (vs 500 NG)
+    carbon_price_today=0.0,
+    carbon_trajectory="linear",
+    carbon_intensity_ccgt=0.0,     # green H2 → no combustion CO2
+    carbon_intensity_ocgt=0.0,
+)
+
 SOLAR_EU = TechParams("Solar PV (EU)", lcoe_today=60.0, learning_rate=0.30,
                       cumulative_gw_2025=2900.0, annual_additions_gw=650.0,
                       additions_growth_rate=0.15, om_frac_lcoe=0.15)
@@ -295,6 +312,10 @@ REGIONS = {
                gas=GAS_EU, smr=SMR_EU, grid_ppa=GRID_PPA_EU, sys=SYSTEM_EU,
                mean_irr=3.8, mean_wind_ms=7.0),
 }
+
+# Firming-resource choice (CLI --firming). "gas" keeps the region's default natural
+# gas; "h2" swaps in green-hydrogen firming (zero-carbon, pricey fuel).
+FIRMING_PRESETS = {"gas": None, "h2": GAS_H2}   # None → region default gas
 
 
 # Resource-quality presets: (mean_irr [kWh/m²/day], mean_wind_ms). "default" is the
