@@ -65,6 +65,9 @@ python datacenter_lcoe.py --tornado --region eu --re 0.9
 # Green-hydrogen firming instead of natural gas (zero combustion carbon, pricey fuel)
 python datacenter_lcoe.py --region eu --re 0.9 --firming h2
 
+# Gas-backed vs green-H2-firmed delivered cost, same RE build → comparison figure
+python datacenter_lcoe.py --firming-compare --region eu --re 0.9
+
 # Long-duration storage overlay: can iron-air or self-produced H2 (made from RE
 # overcapacity) displace the residual gas?  Tanks (default), salt cavern, or iron-air.
 python datacenter_lcoe.py --ldes h2 --region eu --re 0.9          # self-produced H2, tanks

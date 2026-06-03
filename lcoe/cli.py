@@ -9,8 +9,9 @@ from .params import (REGIONS, WORKLOAD_PRESETS, WorkloadProfile,
                      AI_TRAINING, RESOURCE_PRESETS, FIRMING_PRESETS, LDES_PRESETS)
 from .simulate import run_region_key, run_full_suite
 from .analysis import (run_flex_sensitivity, run_resource_sensitivity, run_tornado,
-                       run_ldes_overlay, run_ldes_joint)
-from .plots import plot_flex_heatmap, plot_tornado, plot_ldes_joint
+                       run_ldes_overlay, run_ldes_joint, run_firming_comparison)
+from .plots import (plot_flex_heatmap, plot_tornado, plot_ldes_joint,
+                    plot_firming_comparison)
 
 
 def build_arg_parser():
@@ -52,6 +53,9 @@ def build_arg_parser():
     p.add_argument("--ldes-joint", choices=list(LDES_PRESETS),
                    help="JOINT co-optimise a gas-free zero-carbon datacenter "
                         "(solar+wind+LFP+self/bought-H2), swept over market-H2 price → figure")
+    p.add_argument("--firming-compare", action="store_true",
+                   help="compare gas-backed vs green-H2-firmed delivered cost for a "
+                        "region/RE target → figure")
     p.add_argument("--grid-steps", type=int, help="advanced: optimiser grid resolution")
     p.add_argument("--mc", type=int, help="advanced: Monte-Carlo weather years")
     return p
@@ -99,6 +103,18 @@ def main(argv=None):
         run_resource_sensitivity(region_key=region, re_target=re_t,
                                  years=args.years, seed=args.seed,
                                  grid_steps=args.grid_steps, n_mc=args.mc)
+        return
+
+    # Gas-backed vs green-H2-firmed delivered-cost comparison
+    if args.firming_compare:
+        region = args.region or "eu"
+        re_t = (args.re or [0.90])[0]
+        r = run_firming_comparison(region_key=region, re_target=re_t,
+                                   grid_steps=args.grid_steps, n_mc=args.mc, seed=args.seed)
+        name = f"{region}_firming_compare"
+        fig = plot_firming_comparison(r)
+        fig.savefig(f"figs/{name}.png", dpi=200, bbox_inches="tight"); plt.close(fig)
+        print(f"\nDone — firming comparison figure saved: figs/{name}.png")
         return
 
     # Joint gas-free zero-carbon co-optimisation + market-H2 price spike sweep

@@ -109,30 +109,34 @@ def plot_optimal_mix(results, region="US"):
 
 
 def plot_component_breakdown(results, reliability=0.90, region="US"):
-    """Delivered-cost breakdown by factor (generation / battery / gas), each split
-    into capex vs opex. Solid fill = capex, hatched = opex, within a colour family."""
+    """Delivered-cost breakdown by factor (generation / battery / firming), each split
+    into capex vs opex. Solid fill = capex, hatched = opex, within a colour family. The
+    firming bands are labelled generically so the figure is correct whether the firming
+    resource is natural gas or green H₂ (`--firming h2`, whose carbon band is ~0)."""
     sc = results["scenarios"][reliability]; yrs = results["years"]
     z = np.zeros_like(sc["gen_capex"])
+    firm = results.get("gas_name", "Firming")        # "Gas Backup (US)" | "Green H2 firming…"
     # (values, label, colour, hatch)  — capex solid, opex hatched, per factor
     bands = [
         (sc["gen_capex"],          "Generation — capex", C_SOL,  None),
         (sc["gen_om"],             "Generation — O&M",   C_SOL,  "////"),
         (sc["batt_capex"],         "Battery — capex",    C_BATT, None),
         (sc["batt_om"],            "Battery — O&M",      C_BATT, "////"),
-        (sc["gas_capex"],          "Gas — capex",        C_GAS,  None),
-        (sc["gas_opex"],           "Gas — fuel + O&M",   C_GAS,  "////"),
-        (sc["gas_carbon"],         "Gas — carbon",       "#2B2D42", "xx"),
+        (sc["gas_capex"],          "Firming — capex",        C_GAS,  None),
+        (sc["gas_opex"],           "Firming — fuel + O&M",   C_GAS,  "////"),
+        (sc["gas_carbon"],         "Firming — carbon",       "#2B2D42", "xx"),
         (sc.get("opt_cp", z),      "Lost compute (shed)", C_SMR, ".."),
     ]
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
     bottom = np.zeros_like(yrs, dtype=float)
     for vals, lbl, col, hatch in bands:
-        if np.allclose(vals, 0):   # skip empty bands (e.g. shed for firm)
+        if np.allclose(vals, 0):   # skip empty bands (e.g. carbon for green H₂, shed for firm)
             continue
         ax.fill_between(yrs, bottom, bottom + vals, label=lbl, facecolor=col,
                         alpha=0.85, hatch=hatch, edgecolor="white", linewidth=0.3)
         bottom = bottom + vals
-    ax.plot(yrs, results["gas_pure"], color="#E07A5F", lw=2, ls="--", label="Gas CCGT (pure)")
+    ax.plot(yrs, results["gas_pure"], color="#E07A5F", lw=2, ls="--",
+            label=f"{firm} (pure)")
     ax.set(xlabel="Year", ylabel="Delivered cost ($/MWh)",
            title=f"Cost breakdown (capex/opex by factor) at {reliability:.0%} RE — {region}",
            xlim=(yrs[0], yrs[-1]), ylim=(0, None))
@@ -238,5 +242,30 @@ def plot_ldes_joint(result: Dict) -> "plt.Figure":
     l0, lab0 = a1.get_legend_handles_labels(); l1, lab1 = a1b.get_legend_handles_labels()
     a1.legend(l0 + l1, lab0 + lab1, fontsize=8, loc="upper left")
     a0.text(0.01, 0.01, REFS, transform=a0.transAxes, fontsize=6, va="bottom",
+            alpha=0.5, family="monospace")
+    fig.tight_layout(); return fig
+
+
+def plot_firming_comparison(result: Dict) -> "plt.Figure":
+    """Gas-backed vs green-H₂-firmed delivered cost for the same firm RE datacenter:
+    the cost (and convergence as carbon rises) of zero-carbon firming."""
+    s = result["series"]; reg = result["region"]; R = result["re_target"]
+    yrs = s["Gas-backed"]["years"]
+    fig, ax = plt.subplots(figsize=(7.5, 5))
+    ax.plot(yrs, s["Gas-backed"]["lcoe"], "o-", color=C_GAS, lw=2,
+            label="RE + gas firming (delivered)")
+    ax.plot(yrs, s["Green-H₂-firmed"]["lcoe"], "s-", color=C_PPA, lw=2,
+            label="RE + green-H₂ firming (delivered, zero-C)")
+    ax.plot(yrs, s["Gas-backed"]["firm_ref"], ls="--", color=C_GAS, lw=1.5, alpha=0.7,
+            label="pure gas (ref)")
+    ax.plot(yrs, s["Green-H₂-firmed"]["firm_ref"], ls=":", color=C_PPA, lw=1.5, alpha=0.8,
+            label="pure green-H₂ (ref)")
+    ax.fill_between(yrs, s["Gas-backed"]["lcoe"], s["Green-H₂-firmed"]["lcoe"],
+                    color=C_PPA, alpha=0.10, edgecolor="none")
+    ax.set(xlabel="Year", ylabel="Delivered cost ($/MWh)",
+           title=f"Firming choice: gas vs green H₂ — {reg} — {R:.0%} RE",
+           xlim=(yrs[0], yrs[-1]), ylim=(0, None))
+    ax.legend(fontsize=8, frameon=True, facecolor="white", loc="upper right")
+    ax.text(0.01, 0.01, REFS, transform=ax.transAxes, fontsize=6, va="bottom",
             alpha=0.5, family="monospace")
     fig.tight_layout(); return fig

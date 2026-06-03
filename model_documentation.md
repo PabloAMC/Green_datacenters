@@ -573,7 +573,13 @@ and a modestly higher turbine capex. It trades EU carbon exposure for expensive 
 EU 90% RE the 100%-firming reference is ≈\$250/MWh (flat, carbon-free) vs natural gas's
 \$114→\$163 rising path, but because the firm system burns it only ~10% of hours, an RE+H₂
 build still lands well below pure H₂ and decarbonises the residual. Stylised & adjustable
-(`GAS_H2`).
+(`GAS_H2`). The breakdown figures (`fig4`/`fig5`) label the firming bands generically
+("Firming — capex / fuel + O&M / carbon"), so they are correct under either firming
+(green-H₂'s carbon band is ~0 and auto-hidden). `run_firming_comparison` (CLI
+`--firming-compare`) re-optimises the same datacenter under gas vs green-H₂ firming and
+plots both delivered-cost trajectories: in the EU at 90% RE green-H₂ firming costs
+≈ +$24–40/MWh, a premium that **narrows over time** as the EU carbon price makes gas
+firming dearer (the pure-gas reference rises to cross the RE+H₂ delivered cost ≈ 2036).
 
 **Pure gas reference** (CCGT at 85% CF, verified values):
 

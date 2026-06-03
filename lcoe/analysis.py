@@ -457,3 +457,38 @@ def run_ldes_joint(region_key="eu", target_year=2035, ldes_tech="h2",
     print("  (Joint Nelder-Mead on a years-vectorised dispatch; reduced fidelity.)\n")
     return {"region": cfg["label"], "target_year": target_year, "ldes_tech": ldes.name,
             "h2_buy_base": h2_buy_base, "by_mult": out}
+
+
+def run_firming_comparison(region_key="eu", re_target=0.90, years=15,
+                           grid_steps=None, n_mc=None, seed=42):
+    """
+    Re-optimise the same firm datacenter with two firming choices — natural **gas**
+    vs **green H₂** (zero-carbon, purchased) — at a fixed RE target, and return both
+    delivered-cost trajectories plus each firming resource's pure reference. Shows the
+    cost (and convergence, as EU carbon climbs) of going zero-carbon-firm. Each call
+    runs the full optimiser twice; reduced fidelity via grid_steps/n_mc if desired.
+    """
+    cfg = REGIONS[region_key]
+    sysp = cfg["sys"]
+    ov = {k: v for k, v in (("grid_steps", grid_steps), ("n_mc_weather", n_mc)) if v}
+    if ov:
+        sysp = _sys_with(sysp, **ov)
+    out = {}
+    for tag, gas in (("Gas-backed", cfg["gas"]), ("Green-H₂-firmed", GAS_H2)):
+        res = run_simulation(
+            solar=cfg["solar"], wind=cfg["wind"], battery=cfg["battery"], gas=gas,
+            smr=cfg["smr"], sys=sysp, workload=FIRM, mean_irr=cfg["mean_irr"],
+            mean_wind_ms=cfg["mean_wind_ms"], years=years, reliabilities=[re_target],
+            seed=seed)
+        out[tag] = {"years": res["years"],
+                    "lcoe": res["scenarios"][re_target]["opt_delivered"],
+                    "firm_ref": res["gas_pure"], "firm_name": res["gas_name"]}
+    yrs = out["Gas-backed"]["years"]
+    print(f"\n  FIRMING COMPARISON — {cfg['label']} | {re_target:.0%} RE (firm)")
+    print(f"    {'Year':<6}{'gas-backed':>12}{'green-H₂':>12}{'Δ (H₂−gas)':>12}")
+    for y in [yy for yy in (2025, 2030, 2035, 2040) if yy <= yrs[-1]]:
+        k = y - yrs[0]
+        g = out["Gas-backed"]["lcoe"][k]; h = out["Green-H₂-firmed"]["lcoe"][k]
+        print(f"    {y:<6}{g:>11.1f} {h:>11.1f} {h-g:>+11.1f}")
+    print()
+    return {"region": cfg["label"], "re_target": re_target, "series": out}
