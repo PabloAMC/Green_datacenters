@@ -236,12 +236,13 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
     cfg = REGIONS[region_key]
     sys = _sys_with(cfg["sys"], grid_steps=grid_steps, n_mc_weather=n_mc)
     ldes = LDES_PRESETS[ldes_tech]
-    if ldes_hours is None:
-        ldes_hours = [0, 24, 96, 168, 336, 720]      # 0 h … 1 month of storage
+    # Sweep electrolyser (charge) power × storage energy. The turbine (discharge) is
+    # always full-size (1.0) so it can firm the load; the question is how big an
+    # electrolyser + store drive the residual (= would-be-blackout if gas-free) → 0.
+    charge_set = [0.3, 0.5, 0.75, 1.0]
+    storage_set = [48.0, 168.0, 336.0] if ldes_hours is None else list(ldes_hours)
+    dis_pow = 1.0
     n = sys.project_lifetime_yr
-    ch_pow, dis_pow = ldes.charge_power_mw, ldes.discharge_power_mw
-    dis_capex_kw0 = ldes.discharge_capex_kw if ldes.discharge_capex_kw is not None \
-        else ldes.capex_kw_today
 
     print(f"\n[LDES overlay] {cfg['label']} | {re_target:.0%} RE | {ldes.name} | "
           f"{target_year} — solving no-LDES build, then 2-storage overlay …")
@@ -256,10 +257,16 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
     gen_cost, lfp_cost = float(sc["opt_cg"][i]), float(sc["opt_cs"][i])  # fixed build
 
     batt = cfg["battery"]; gas = cfg["gas"]
+    # Learning (conservative, IRENA/IEA): only the ELECTROLYSER (charge kit) is taken
+    # to learn; the H2 turbine (mature) and the storage vessels are held flat. The LDES
+    # preset's learning_rate/trajectory are tuned to a realistic ~30–35% electrolyser
+    # decline by 2035, not an aggressive collapse.
     cum_ldes = cumulative_capacity(ldes, years)
-    def _learn(c0):   # LDES capex at the target year via its own learning curve
-        return float(wright_law(c0, ldes.cumulative_gwh_2025, cum_ldes, ldes.learning_rate)[i])
-    e_capex, ch_capex, dis_capex = _learn(ldes.capex_kwh_today), _learn(ldes.capex_kw_today), _learn(dis_capex_kw0)
+    ch_capex = float(wright_law(ldes.capex_kw_today, ldes.cumulative_gwh_2025,
+                                cum_ldes, ldes.learning_rate)[i])      # electrolyser
+    e_capex = ldes.capex_kwh_today                                     # storage (flat)
+    dis_capex = (ldes.discharge_capex_kw if ldes.discharge_capex_kw is not None
+                 else ldes.capex_kw_today)                             # turbine (flat)
     lfp_pow = 1.0 if B_lfp <= 4.0 else min(1.0, 4.0 / B_lfp)
 
     wkw = dict(wind_solar_corr=sys.wind_solar_corr, syn_loading=sys.syn_loading,
@@ -268,43 +275,60 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
                wind_seasonal_amp=sys.wind_seasonal_amp)
     clearsky = solar_clearsky(cfg["mean_irr"])
     rng = np.random.default_rng(seed + 7)
-    B_arr = np.array(ldes_hours, dtype=float)
+
+    # Candidate (charge_pow, storage_h) grid + a no-LDES baseline (B=0).
+    cand = [(0.0, 0.0)] + [(c, s) for c in charge_set for s in storage_set]
+    ch_arr = np.array([c for c, _ in cand], dtype=float)
+    B_arr = np.array([s for _, s in cand], dtype=float)
     gas_frac, gas_peak, _lfp_efc, ldes_efc = dispatch_ldes_overlay(
         clearsky, cfg["mean_wind_ms"], rng, wkw, C_sol, C_win, B_lfp,
-        lfp_pow, batt.roundtrip_efficiency, B_arr, ch_pow, dis_pow,
+        lfp_pow, batt.roundtrip_efficiency, B_arr, ch_arr, dis_pow,
         ldes.roundtrip_efficiency, n_mc)
 
     rows = []
-    for k, h in enumerate(ldes_hours):
-        ldes_cost = 0.0 if h <= 0 else ldes_annual_cost(
-            ldes, h, e_capex, ch_capex, dis_capex, ch_pow, dis_pow, ldes.wacc, n,
+    for k, (c, s) in enumerate(cand):
+        ldes_cost = 0.0 if s <= 0 else ldes_annual_cost(
+            ldes, s, e_capex, ch_capex, dis_capex, c, dis_pow, ldes.wacc, n,
             float(ldes_efc[k])) / 8760.0
         gas_cost = gas_backup_cost_scalar(
             float(gas_frac[k]), gas, i, gas.wacc,
             gas_peak=float(np.clip(gas_peak[k], 0.05, 1.0)))
-        rows.append({"h": h, "gas_frac": float(gas_frac[k]), "ldes_cost": ldes_cost,
-                     "gas_cost": gas_cost, "total": gen_cost + lfp_cost + ldes_cost + gas_cost})
-    base = rows[0]["total"]
+        rows.append({"charge": c, "h": s, "gas_frac": float(gas_frac[k]),
+                     "ldes_cost": ldes_cost, "gas_cost": gas_cost,
+                     "total": gen_cost + lfp_cost + ldes_cost + gas_cost})
+    base = rows[0]
     best = min(rows, key=lambda r: r["total"])
+    # smallest config (by total cost) that gets the residual under 1% of load
+    firm_rows = [r for r in rows if r["h"] > 0 and r["gas_frac"] < 0.01]
+    near_firm = min(firm_rows, key=lambda r: r["total"]) if firm_rows else None
 
     print(f"  Fixed build: {C_sol:.1f}× solar + {C_win:.1f}× wind + {B_lfp:.0f}h LFP "
-          f"(no-LDES optimum). LDES capex: {e_capex:.1f} $/kWh energy, "
-          f"{ch_capex:.0f} $/kW charge ({ch_pow:.2f} MW), {dis_capex:.0f} $/kW "
-          f"discharge ({dis_pow:.2f} MW); RTE {ldes.roundtrip_efficiency:.0%}.")
-    print(f"    {'LDES h':>7}{'gas%':>7}{'LDES$':>8}{'gas$':>8}{'total$':>9}{'Δ no-LDES':>11}")
-    print("    " + "─" * 50)
-    for r in rows:
-        print(f"    {r['h']:>7.0f}{r['gas_frac']*100:>6.1f}%{r['ldes_cost']:>8.1f}"
-              f"{r['gas_cost']:>8.1f}{r['total']:>9.1f}{r['total']-base:>+11.1f}")
-    if best["h"] <= 0:
-        print(f"  → LDES does NOT lower cost here: the gas backup stays cheaper "
-              f"(best = no LDES, ${base:.1f}/MWh).")
+          f"(no-LDES optimum). Storage {e_capex:.0f} $/kWh (flat), electrolyser "
+          f"{ch_capex:.0f} $/kW (learned from {ldes.capex_kw_today:.0f}), turbine "
+          f"{dis_capex:.0f} $/kW; RTE {ldes.roundtrip_efficiency:.0%}.")
+    print(f"  Residual gas % (= would-be unserved if gas-free)  |  delivered $/MWh")
+    hdr = f"    {'elec\\\\stor':>10}" + "".join(f"{int(s):>6}h" for s in storage_set)
+    print(hdr); print("    " + "─" * (len(hdr) - 4))
+    print(f"    {'no LDES':>10}  gas {base['gas_frac']*100:4.1f}%  →  ${base['total']:.0f}/MWh")
+    for c in charge_set:
+        cells = ""
+        for s in storage_set:
+            r = next(x for x in rows if x["charge"] == c and x["h"] == s)
+            cells += f"{r['gas_frac']*100:4.1f}%/{r['total']:4.0f}"
+        print(f"    {c:>9.2f}MW {cells}")
+    print(f"  → Lowest cost: elec {best['charge']:.2f}MW + {best['h']:.0f}h → "
+          f"${best['total']:.0f}/MWh, gas {best['gas_frac']*100:.1f}% "
+          f"(vs no-LDES ${base['total']:.0f}/MWh @ {base['gas_frac']*100:.1f}% gas).")
+    if near_firm:
+        print(f"  → Near gas-free (<1% residual): elec {near_firm['charge']:.2f}MW + "
+              f"{near_firm['h']:.0f}h → ${near_firm['total']:.0f}/MWh "
+              f"(+${near_firm['total']-base['total']:.0f} for the last ~"
+              f"{base['gas_frac']*100:.0f}% of firming).")
     else:
-        print(f"  → Best: {best['h']:.0f}h LDES → ${best['total']:.1f}/MWh "
-              f"({best['total']-base:+.1f} vs no-LDES); gas {rows[0]['gas_frac']*100:.1f}% "
-              f"→ {best['gas_frac']*100:.1f}% of load.")
-    print("  (Greedy overlay: LFP/overbuild fixed from the no-LDES optimum → conservative "
-          "lower bound on LDES value; reduced fidelity.)\n")
+        print("  → No swept config drives the residual below 1%: a bigger electrolyser "
+              "/ store (or higher discharge power) is needed for a gas-free system.")
+    print("  (Greedy overlay: LFP/overbuild fixed from the no-LDES optimum; only the "
+          "electrolyser is assumed to learn; reduced fidelity. cells = gas%/$tot.)\n")
     return {"region": cfg["label"], "re_target": re_target, "target_year": target_year,
             "ldes_tech": ldes.name, "build": (C_sol, C_win, B_lfp), "rows": rows,
-            "base_total": base, "best": best}
+            "base": base, "best": best, "near_firm": near_firm}

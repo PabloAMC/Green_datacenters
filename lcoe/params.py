@@ -302,8 +302,10 @@ LDES_IRONAIR = BatteryParams(
     name="LDES (iron-air)",
     capex_kwh_today=20.0, capex_kw_today=1500.0, discharge_capex_kw=1500.0,
     charge_power_mw=1.0, discharge_power_mw=1.0,
-    learning_rate=0.10, cumulative_gwh_2025=5.0, annual_additions_gwh=5.0,
-    additions_growth_rate=0.40, roundtrip_efficiency=0.50,
+    # CONSERVATIVE learning (IRENA/IEA): ~15%/doubling on the power kit, modest
+    # deployment → ≈30–35% decline by 2035 (energy held flat in the overlay).
+    learning_rate=0.15, cumulative_gwh_2025=20.0, annual_additions_gwh=6.0,
+    additions_growth_rate=0.12, roundtrip_efficiency=0.50,
     calendar_deg_per_yr=0.005, cycle_deg_per_fec=1e-5, om_frac_capex=0.02, wacc=0.08,
 )
 # (b) Self-produced green H2 (power→H2→power), the user's "make H2 on sunny days"
@@ -318,20 +320,25 @@ LDES_H2 = BatteryParams(
     capex_kwh_today=20.0,           # above-ground tank H2 storage, $/kWh-H2 (no cavern)
     capex_kw_today=1200.0,          # electrolyser (charge), $/kW  — Lazard LCOH/NREL
     discharge_capex_kw=1300.0,      # H2 turbine/fuel cell (discharge), $/kW
-    charge_power_mw=0.35,           # small electrolyser: "slowly produce on sunny days"
+    charge_power_mw=0.35,           # nominal; the --ldes overlay sweeps electrolyser size
     discharge_power_mw=1.0,         # turbine sized to firm the load
-    learning_rate=0.12, cumulative_gwh_2025=2.0, annual_additions_gwh=3.0,
-    additions_growth_rate=0.45, roundtrip_efficiency=0.35,
+    # CONSERVATIVE electrolyser learning: ~15%/doubling (IRENA Green Hydrogen Cost
+    # Reduction 2020 cites 16–21%), modest deployment → ≈35% decline by 2035. NOT an
+    # aggressive collapse. Turbine (mature) and tank storage are held flat in the overlay.
+    learning_rate=0.15, cumulative_gwh_2025=20.0, annual_additions_gwh=6.0,
+    additions_growth_rate=0.12, roundtrip_efficiency=0.35,
     calendar_deg_per_yr=0.010, cycle_deg_per_fec=1e-5, om_frac_capex=0.03, wacc=0.08,
 )
-# (c) Same, but with a SALT CAVERN for storage (geology permitting): energy collapses
-#     to ≈ $0.6/kWh-H2 (Lazard LCOH v4.0: $20/kg ÷ 33.3 kWh/kg). The optimistic case.
+# (c) Same, but with a SALT CAVERN for storage — SPECULATIVE / geology-dependent (most
+#     sites have no cavern): energy ≈ $0.6/kWh-H2 (Lazard LCOH v4.0: $20/kg ÷ 33.3
+#     kWh/kg). Provided only to bound the optimistic end; the tank case above is the
+#     realistic default.
 LDES_H2_CAVERN = BatteryParams(
-    name="LDES (self-produced H2, salt cavern)",
+    name="LDES (self-produced H2, salt cavern — speculative)",
     capex_kwh_today=0.6, capex_kw_today=1200.0, discharge_capex_kw=1300.0,
     charge_power_mw=0.35, discharge_power_mw=1.0,
-    learning_rate=0.12, cumulative_gwh_2025=2.0, annual_additions_gwh=3.0,
-    additions_growth_rate=0.45, roundtrip_efficiency=0.35,
+    learning_rate=0.15, cumulative_gwh_2025=20.0, annual_additions_gwh=6.0,
+    additions_growth_rate=0.12, roundtrip_efficiency=0.35,
     calendar_deg_per_yr=0.010, cycle_deg_per_fec=1e-5, om_frac_capex=0.03, wacc=0.08,
 )
 LDES_PRESETS = {"iron-air": LDES_IRONAIR, "h2": LDES_H2, "h2-cavern": LDES_H2_CAVERN}
