@@ -6,12 +6,14 @@ from dataclasses import replace
 from typing import Dict
 
 import numpy as np
+from scipy.optimize import minimize
 
 from .params import (REGIONS, RESOURCE_PRESETS, LDES_PRESETS, GAS_H2, FIRM,
                      WorkloadProfile, _sys_with)
-from .costs import cumulative_capacity, wright_law, crf
-from .weather import solar_clearsky
-from .dispatch import dispatch_ldes_overlay
+from .costs import (cumulative_capacity, wright_law, rewacc_lcoe, crf,
+                    battery_annualised_cost)
+from .weather import solar_clearsky, generate_weather_year
+from .dispatch import dispatch_ldes_overlay, dispatch_h2_vec
 from .simulate import run_simulation
 
 
@@ -342,3 +344,116 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
     return {"region": cfg["label"], "re_target": re_target, "target_year": target_year,
             "ldes_tech": ldes.name, "build": (C_sol, C_win, B_lfp), "rows": rows,
             "base": base, "best": best, "h2_buy_var": h2_buy_var}
+
+
+def run_ldes_joint(region_key="eu", target_year=2035, ldes_tech="h2",
+                   h2_price_mults=(1.0, 2.0, 4.0), n_mc=8, years=15, seed=42):
+    """
+    JOINT co-optimisation of a 100%-firm, gas-free, ZERO-CARBON datacenter:
+    minimise delivered LCOE over (C_sol, C_win, B_lfp, electrolyser_power,
+    H2_storage_hours), with the residual the system can't self-supply bought as green
+    H2 from the market. Unlike the greedy overlay (which fixes the no-LDES build),
+    here overbuild, LFP and H2 trade off directly. No RE target — everything is green
+    (self-produced or purchased H2), so it is purely a cost minimisation.
+
+    Swept over `h2_price_mults` — multipliers on the market H2 price — to stress the
+    deep-lull spike: when continent-wide Dunkelflaute makes bought H2 dear, the optimum
+    shifts toward self-production (more electrolyser / storage / overbuild). Multi-start
+    Nelder-Mead on a years-vectorised chronological dispatch (fixed weather → smooth
+    objective). Opt-in & reduced fidelity. Returns a dict (one entry per multiplier).
+    """
+    cfg = REGIONS[region_key]; sysp = cfg["sys"]; ldes = LDES_PRESETS[ldes_tech]
+    n = sysp.project_lifetime_yr; i = int(target_year - 2025)
+    batt = cfg["battery"]
+
+    # ── unit costs at the target year ───────────────────────────────────────────
+    lcoe_sol = rewacc_lcoe(wright_law(cfg["solar"].lcoe_today, cfg["solar"].cumulative_gw_2025,
+                                      cumulative_capacity(cfg["solar"], years),
+                                      cfg["solar"].learning_rate), cfg["solar"])[i]
+    lcoe_win = rewacc_lcoe(wright_law(cfg["wind"].lcoe_today, cfg["wind"].cumulative_gw_2025,
+                                      cumulative_capacity(cfg["wind"], years),
+                                      cfg["wind"].learning_rate), cfg["wind"])[i]
+    cum_b = cumulative_capacity(batt, years)
+    lfp_kwh = float(wright_law(batt.capex_kwh_today, batt.cumulative_gwh_2025, cum_b, batt.learning_rate)[i])
+    lfp_kw  = float(wright_law(batt.capex_kw_today,  batt.cumulative_gwh_2025, cum_b, batt.learning_rate)[i])
+    cum_l = cumulative_capacity(ldes, years)
+    ch_capex = float(wright_law(ldes.capex_kw_today, ldes.cumulative_gwh_2025, cum_l, ldes.learning_rate)[i])
+    e_capex = ldes.capex_kwh_today
+    dis_capex = ldes.discharge_capex_kw if ldes.discharge_capex_kw is not None else ldes.capex_kw_today
+    h2_buy_base = GAS_H2.gas_price_mmbtu * GAS_H2.ccgt_heat_rate + GAS_H2.vom_mwh
+    crf_l = crf(ldes.wacc, n); annuity = (1.0 - (1.0 + ldes.wacc) ** (-n)) / ldes.wacc
+
+    # ── pre-generate fixed weather (Y, 8760) so the NM objective is smooth ───────
+    rng = np.random.default_rng(seed)
+    sols, wins = [], []
+    for _ in range(n_mc):
+        s, w = generate_weather_year(
+            solar_clearsky(cfg["mean_irr"]), cfg["mean_wind_ms"], rng,
+            wind_solar_corr=sysp.wind_solar_corr, syn_loading=sysp.syn_loading,
+            syn_persistence=sysp.syn_persistence, cloud_ar1=sysp.cloud_ar1,
+            wind_ar1=sysp.wind_ar1, wind_daily_share=sysp.wind_daily_share,
+            wind_seasonal_amp=sysp.wind_seasonal_amp)
+        sols.append(s); wins.append(w)
+    sol2d = np.array(sols); win2d = np.array(wins)
+    CF_sol = float(sol2d.mean()); CF_win = float(win2d.mean())
+
+    lo = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
+    hi = np.array([24.0, 22.0, 24.0, 1.5, 720.0])   # C_sol, C_win, B_lfp, elec, H2-store
+
+    def evaluate(x, mult):
+        C_sol, C_win, B_lfp, elec, H2 = [float(np.clip(x[j], lo[j], hi[j])) for j in range(5)]
+        lfp_pow = 1.0 if B_lfp <= 4.0 else min(1.0, 4.0 / B_lfp)
+        resid, efc = dispatch_h2_vec(sol2d, win2d, C_sol, C_win, B_lfp, lfp_pow,
+                                     batt.roundtrip_efficiency, H2, elec, 1.0,
+                                     ldes.roundtrip_efficiency)
+        gen = C_sol * CF_sol * lcoe_sol + C_win * CF_win * lcoe_win
+        lfp = battery_annualised_cost(batt, B_lfp, lfp_kwh, lfp_kw, batt.wacc, n) / 8760.0
+        cost_one = (elec * ch_capex + 1.0 * dis_capex) * 1e3 + H2 * e_capex * 1e3
+        npv = cost_one + (ldes.calendar_deg_per_yr + ldes.cycle_deg_per_fec * efc * 365) \
+            * (H2 * e_capex * 1e3) * annuity
+        cap = (npv * crf_l + cost_one * ldes.om_frac_capex) / 8760.0
+        buy = resid * h2_buy_base * mult
+        return gen + lfp + cap + buy, dict(C_sol=C_sol, C_win=C_win, B_lfp=B_lfp,
+                                           elec=elec, H2=H2, buy_frac=resid,
+                                           gen=gen, lfp=lfp, cap=cap, buy=buy)
+
+    starts = [np.array(s) for s in ([8, 8, 6, 0.4, 48], [12, 11, 6, 0.7, 120],
+                                    [15, 14, 6, 1.0, 300], [6, 6, 3, 0.3, 24],
+                                    [18, 16, 6, 1.0, 480])]
+    out = {}
+    for mult in h2_price_mults:
+        best_v, best_x = np.inf, starts[0]
+        for x0 in starts:
+            res = minimize(lambda x: evaluate(x, mult)[0], x0, method="Nelder-Mead",
+                           options={"xatol": 0.02, "fatol": 0.02, "maxiter": 1200,
+                                    "adaptive": True})
+            if res.fun < best_v:
+                best_v, best_x = res.fun, res.x
+        total, d = evaluate(best_x, mult)
+        d["total"] = total; d["mult"] = mult; d["h2_price"] = h2_buy_base * mult
+        out[mult] = d
+
+    print(f"\n[LDES joint co-opt] {cfg['label']} | gas-free zero-carbon firm DC | "
+          f"{target_year} | {ldes.name} — minimising 24/7 green LCOE, market-H₂ stress …")
+    print(f"  Market green H₂ base {h2_buy_base:.0f} $/MWh-e (Lazard). CF sol {CF_sol:.3f} "
+          f"wind {CF_win:.3f}. Joint vars: solar× wind× LFP-h electrolyser-MW H₂-store-h.")
+    print(f"    {'H₂×':>4}{'$/MWh-e':>9}{'C_sol':>7}{'C_win':>7}{'LFP h':>7}"
+          f"{'elec':>7}{'H₂ h':>7}{'buy%':>7}{'LCOE':>8}")
+    print("    " + "─" * 64)
+    for mult in h2_price_mults:
+        d = out[mult]
+        print(f"    {mult:>3.0f}×{d['h2_price']:>8.0f}{d['C_sol']:>7.1f}{d['C_win']:>7.1f}"
+              f"{d['B_lfp']:>7.1f}{d['elec']:>7.2f}{d['H2']:>7.0f}{d['buy_frac']*100:>6.1f}%"
+              f"{d['total']:>8.0f}")
+    d1 = out[h2_price_mults[0]]
+    print(f"  → At base price: ${d1['total']:.0f}/MWh, fully gas-free & zero-carbon, "
+          f"self-producing {100*(1-d1['buy_frac']):.0f}% of firming "
+          f"({d1['elec']:.2f} MW electrolyser + {d1['H2']:.0f}h H₂ store).")
+    if len(h2_price_mults) > 1:
+        dN = out[h2_price_mults[-1]]
+        print(f"  → At {h2_price_mults[-1]:.0f}× H₂ spike: ${dN['total']:.0f}/MWh; the optimum "
+              f"shifts to {dN['elec']:.2f} MW electrolyser + {dN['H2']:.0f}h store, "
+              f"buying only {dN['buy_frac']*100:.1f}% — self-production hedges the spike.")
+    print("  (Joint Nelder-Mead on a years-vectorised dispatch; reduced fidelity.)\n")
+    return {"region": cfg["label"], "target_year": target_year, "ldes_tech": ldes.name,
+            "h2_buy_base": h2_buy_base, "by_mult": out}

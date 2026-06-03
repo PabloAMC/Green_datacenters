@@ -289,3 +289,43 @@ def dispatch_ldes_overlay(clearsky, mean_wind, rng, weather_kwargs,
                             / np.where(soc_ldes_max > 0, soc_ldes_max, 1.0) / 365.0 / n_mc,
                             0.0)
     return gas_frac, gas_peak, lfp_efc, ldes_efc
+
+
+def dispatch_h2_vec(sol2d, win2d, C_sol, C_win, B_lfp, lfp_pow, lfp_rte,
+                    B_h2, elec_pow, turb_pow, h2_rte):
+    """
+    Single-design 2-storage (LFP + self-produced H2) chronological dispatch,
+    **vectorised over weather years** (sol2d/win2d have shape (Y, 8760)). Years are
+    independent, so they run in parallel as length-Y state vectors — making this fast
+    and deterministic enough to serve as a Nelder-Mead objective for joint
+    co-optimisation. The residual the H2 store cannot cover is bought as green H2 from
+    the market (no blackout).
+
+    Returns (resid_frac, ldes_efc): mean annual share of load served by purchased H2,
+    and the H2 store's throughput equivalent-full-cycles/day (for augmentation costing).
+    """
+    Y, T = sol2d.shape
+    eta_l = lfp_rte ** 0.5
+    eta_h = h2_rte ** 0.5
+    soc_l = np.zeros(Y); soc_h = np.zeros(Y)
+    bought = np.zeros(Y); h2_dis = np.zeros(Y)
+    for t in range(T):
+        g = C_sol * sol2d[:, t] + C_win * win2d[:, t]
+        net = g - 1.0
+        deficit = np.maximum(-net, 0.0)
+        surplus = np.maximum(net, 0.0)
+        # LFP discharge (diurnal)
+        d_l = np.minimum(np.minimum(soc_l * eta_l, lfp_pow), deficit)
+        soc_l -= d_l / eta_l; resid = deficit - d_l
+        # H2 turbine discharge (multi-day)
+        d_h = np.minimum(np.minimum(soc_h * eta_h, turb_pow), resid)
+        soc_h -= d_h / eta_h; h2_dis += d_h; resid -= d_h
+        bought += resid                                  # remainder bought (green H2)
+        # LFP charge, then electrolyser charge from leftover surplus (rest curtailed)
+        c_l = np.minimum(np.minimum((B_lfp - soc_l) / eta_l, lfp_pow), surplus)
+        soc_l += c_l * eta_l; surplus -= c_l
+        c_h = np.minimum(np.minimum((B_h2 - soc_h) / eta_h, elec_pow), surplus)
+        soc_h += c_h * eta_h
+    resid_frac = (bought.sum() / Y) / 8760.0
+    ldes_efc = ((h2_dis.sum() / Y / eta_h) / max(B_h2, 1e-9) / 365.0) if B_h2 > 0 else 0.0
+    return resid_frac, ldes_efc

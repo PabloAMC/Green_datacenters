@@ -209,3 +209,34 @@ def plot_tornado(t: Dict) -> "plt.Figure":
     fig.tight_layout(); return fig
 
 
+
+
+def plot_ldes_joint(result: Dict) -> "plt.Figure":
+    """Joint gas-free zero-carbon optimum vs market-H2 price spike: delivered LCOE
+    and how the optimal design self-produces more as bought H2 gets dearer."""
+    by = result["by_mult"]
+    mults = sorted(by)
+    price = [by[m]["h2_price"] for m in mults]
+    lcoe = [by[m]["total"] for m in mults]
+    buy = [by[m]["buy_frac"] * 100 for m in mults]
+    elec = [by[m]["elec"] for m in mults]
+    fig, (a0, a1) = plt.subplots(1, 2, figsize=(11, 4.4))
+    a0.plot(price, lcoe, "o-", color=C_OPT, lw=2)
+    for x, y in zip(price, lcoe):
+        a0.annotate(f"${y:.0f}", (x, y), textcoords="offset points", xytext=(0, 7),
+                    fontsize=8, ha="center")
+    a0.set(xlabel="Market green-H₂ price ($/MWh-e)",
+           ylabel="Cheapest 24/7 gas-free LCOE ($/MWh)",
+           title=f"Gas-free zero-carbon optimum — {result['region']} — {result['target_year']}",
+           ylim=(0, None))
+    a1.plot(price, buy, "s-", color=C_GAS, lw=2, label="bought H₂ (% of load)")
+    a1b = a1.twinx()
+    a1b.plot(price, elec, "^--", color=C_PPA, lw=2, label="electrolyser (MW/MW-load)")
+    a1.set(xlabel="Market green-H₂ price ($/MWh-e)", ylabel="Bought H₂ (% of load)",
+           title="Self-production hedges the H₂ spike", ylim=(0, None))
+    a1b.set_ylabel("Electrolyser size (MW per MW-load)")
+    l0, lab0 = a1.get_legend_handles_labels(); l1, lab1 = a1b.get_legend_handles_labels()
+    a1.legend(l0 + l1, lab0 + lab1, fontsize=8, loc="upper left")
+    a0.text(0.01, 0.01, REFS, transform=a0.transAxes, fontsize=6, va="bottom",
+            alpha=0.5, family="monospace")
+    fig.tight_layout(); return fig

@@ -97,6 +97,25 @@ def test_ldes_cost_and_overlay():
     assert gas_frac[2] < gas_frac[0]
 
 
+def test_dispatch_h2_vec_residual_falls_with_capacity():
+    """The years-vectorised joint-dispatch: a bigger electrolyser + H2 store leaves
+    less for the market to cover, and the bought share is a valid fraction."""
+    import numpy as np
+    from lcoe.dispatch import dispatch_h2_vec
+    from lcoe.weather import solar_clearsky
+    cs = solar_clearsky(3.8)
+    rng = np.random.default_rng(0)
+    sols, wins = [], []
+    for _ in range(4):
+        s, w = m.generate_weather_year(cs, 7.0, rng, -0.35, 0.5, 0.85)
+        sols.append(s); wins.append(w)
+    sol2d, win2d = np.array(sols), np.array(wins)
+    args = (sol2d, win2d, 8.0, 6.0, 6.0, 0.667, 0.924)   # build + LFP
+    small, _ = dispatch_h2_vec(*args, 0.0, 0.0, 1.0, 0.35)      # no H2
+    big, _ = dispatch_h2_vec(*args, 168.0, 1.0, 1.0, 0.35)      # 1 wk store, full elec
+    assert 0.0 <= big <= small <= 1.0 and big < small
+
+
 def test_ldes_presets():
     # tanks are the default (no cavern); cavern is much cheaper energy; asymmetric power
     assert m.LDES_H2.capex_kwh_today == 20.0          # above-ground tanks

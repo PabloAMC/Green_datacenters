@@ -9,8 +9,8 @@ from .params import (REGIONS, WORKLOAD_PRESETS, WorkloadProfile,
                      AI_TRAINING, RESOURCE_PRESETS, FIRMING_PRESETS, LDES_PRESETS)
 from .simulate import run_region_key, run_full_suite
 from .analysis import (run_flex_sensitivity, run_resource_sensitivity, run_tornado,
-                       run_ldes_overlay)
-from .plots import plot_flex_heatmap, plot_tornado
+                       run_ldes_overlay, run_ldes_joint)
+from .plots import plot_flex_heatmap, plot_tornado, plot_ldes_joint
 
 
 def build_arg_parser():
@@ -49,6 +49,9 @@ def build_arg_parser():
     p.add_argument("--ldes", choices=list(LDES_PRESETS),
                    help="long-duration storage overlay: can iron-air or self-produced "
                         "H2 (charged from RE overcapacity) displace the residual gas?")
+    p.add_argument("--ldes-joint", choices=list(LDES_PRESETS),
+                   help="JOINT co-optimise a gas-free zero-carbon datacenter "
+                        "(solar+wind+LFP+self/bought-H2), swept over market-H2 price → figure")
     p.add_argument("--grid-steps", type=int, help="advanced: optimiser grid resolution")
     p.add_argument("--mc", type=int, help="advanced: Monte-Carlo weather years")
     return p
@@ -96,6 +99,17 @@ def main(argv=None):
         run_resource_sensitivity(region_key=region, re_target=re_t,
                                  years=args.years, seed=args.seed,
                                  grid_steps=args.grid_steps, n_mc=args.mc)
+        return
+
+    # Joint gas-free zero-carbon co-optimisation + market-H2 price spike sweep
+    if args.ldes_joint:
+        region = args.region or "eu"
+        r = run_ldes_joint(region_key=region, target_year=2035, ldes_tech=args.ldes_joint,
+                           n_mc=args.mc or 8, seed=args.seed)
+        name = f"{region}_ldes_joint"
+        fig = plot_ldes_joint(r)
+        fig.savefig(f"figs/{name}.png", dpi=200, bbox_inches="tight"); plt.close(fig)
+        print(f"\nDone — joint co-opt figure saved: figs/{name}.png")
         return
 
     # LDES overlay (iron-air / self-produced H2)

@@ -676,6 +676,29 @@ zero-carbon, firm** EU datacenter is feasible at ~$150/MWh in 2035, self-produci
 its H₂ and buying the rest — modestly cheaper than buying all H₂, and the deep tail is
 handled by the market, not by blackouts or by weeks of storage.
 
+### 7.6 Joint gas-free co-optimisation + market-H₂ spike (`--ldes-joint`)
+
+The overlay above is *greedy* — it bolts H₂ onto the build that was optimal **without**
+it. `run_ldes_joint` (CLI `--ldes-joint`) instead **co-optimises the whole gas-free,
+zero-carbon system**: multi-start Nelder-Mead over (solar×, wind×, LFP h, electrolyser
+MW, H₂-store h) minimising 24/7 delivered LCOE, with the residual bought as green H₂.
+No RE target — it is all-green by construction (self-produced + purchased H₂), so it is a
+pure cost minimisation on a years-vectorised chronological dispatch. It is **swept over
+market-H₂ price multipliers** to stress the deep-lull spike.
+
+**Finding (EU, 2035, self-produced-H₂ tanks).** Co-optimising is **much cheaper than the
+greedy overlay**: ~**$104/MWh** for a fully gas-free, zero-carbon, firm datacenter — vs
+~$150 greedy and ~$182 for the v5.4 gas-backed 90%-RE build. Crucially the optimal *shape*
+changes: freed from the wind-heavy Dunkelflaute hedge, it goes **solar-heavy + big
+electrolyser** (≈13× solar, ≈2× wind, ≈6 h LFP, **≈1.3 MW electrolyser**, ≈16 h H₂),
+self-producing ~95 % of firming and buying ~5 % from the market — turning cheap surplus
+solar into H₂ instead of paying for wind overbuild. **Spike hedge:** as market H₂ rises to
+2×/4×, the optimum builds more solar + electrolyser + store and buys less (4.6 %→1.8 %→1.0 %),
+with LCOE rising only to ~$112/$120 — i.e. self-production caps exposure to an H₂ price
+spike. (Caveats: the low $104 partly reflects the synthetic weather's sun/wind structure
+and the conservative tank/electrolyser learning; multi-start NM on reduced fidelity — treat
+the *shape* and *direction* as robust, the absolute as indicative.)
+
 ---
 
 ## 8. System LCOE and 3D Optimisation
