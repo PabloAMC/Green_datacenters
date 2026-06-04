@@ -2,7 +2,7 @@
 
 An optimization model that finds the least-cost combination of solar PV, onshore wind, LFP battery storage, and natural gas backup to power an off-grid datacenter at a target renewable energy fraction, across the **US** and **Europe**.
 
-📊 **[Live results page →](https://pabloamc.github.io/lcoe_model/)** — the headline conclusions, figures, and assumptions at a glance (generated from `output/`, so it never drifts from the numbers).
+📊 **[Live results page →](https://pabloamc.github.io/Green_datacenteres/)** — the headline conclusions, figures, and assumptions at a glance (generated from `output/`, so it never drifts from the numbers).
 
 **The question it answers:** *if you build a large datacenter that is not connected to the grid, what is the cheapest mix of clean generation + storage + gas backup that keeps it running 24/7 — and in what year does going (mostly) renewable become cheaper than just burning gas?* The headline output is the **LCOE — Levelized Cost of Energy**, the all-in cost of a delivered megawatt-hour (\$/MWh) once capital, fuel, carbon, and storage are amortised over the project's life. New to the terminology? Jump to the **[Glossary](#-glossary)** first.
 

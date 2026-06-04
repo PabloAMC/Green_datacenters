@@ -237,7 +237,7 @@ softens the tails and lowers high-RE cost.</li>
 
 <div class="foot">
 Model v{version} · generated from <code>output/*_firm_results.json</code> at commit
-<code>{commit}</code> (config {cfg}) · <a href="https://github.com/PabloAMC/lcoe_model">source
+<code>{commit}</code> (config {cfg}) · <a href="https://github.com/PabloAMC/Green_datacenteres">source
 on GitHub</a> · licensed CC BY 4.0. Reproduce: <code>make reproduce &amp;&amp; make report</code>.
 </div>
 </div></body></html>"""
