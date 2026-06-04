@@ -17,8 +17,8 @@ and a **high-specific-power wind curve** (rated 13→11 m/s, cut-in 3.5→3.0; C
 US, 0.18→**0.28** EU; §4.4–4.5). The US CFs and EU wind now sit inside Lazard's CF bands;
 EU solar (0.158) sits just below the US band, consistent with its weaker irradiance and its
 own EU-specific LCOE basis (§4.2). Net: high-RE
-delivered LCOE falls ~20–30% and parity moves earlier — **EU 90% RE ≈ 2029, 95% ≈ 2033;
-US 70–80% ≈ 2036, 85% ≈ 2040** (high-RE US still does not beat cheap gas in the horizon). A
+delivered LCOE falls ~20–30% and parity moves earlier — **EU 90% RE ≈ 2029;
+US 70–80% ≈ 2036–37, 85% ≈ 2040** (high-RE US still does not beat cheap gas in the horizon). A
 **reanalysis hook** (`ChronologicalSimulator(weather_years=…)` / `weather.load_weather_traces`)
 lets real ERA5/NSRDB years drive the dispatch unchanged. Tables below are regenerated
 against this baseline.
@@ -142,8 +142,9 @@ The quadratic term prevents the optimiser from accepting small violations cheapl
 Bounds were right-sized in v5.1 (§8.4) so the 21-node grid resolves the real optima
 instead of wasting resolution; a boundary-binding guard warns if any optimum reaches a max.
 (Values match `SystemParams` / `SystemParams(EU)` in the code; the firm, no-shed
-high-RE optimum is wind-heavy in the EU — 95% RE reaches ≈15× wind — so the EU wind
-bound is set to 20× to keep the optimum interior.)
+high-RE optimum is wind-heavy in the EU — the 90% RE build runs ~5× wind, and the unreachable
+≥95% region would demand ≈15× — so the EU wind bound is set to 20× to keep the feasible
+optima interior. Even at that bound the firm battery-only system tops out at ≈94% RE, §11.)
 
 ---
 
@@ -508,7 +509,8 @@ from solar + wind + battery, and at most 10% from the gas backup.** Precisely:
 *   For **interruptible** workloads the denominator is *served* energy: of the power you
     chose to deliver, ≥90% is renewable. The shed fraction (compute you declined to run) is
     reported separately in the summary's `Shed` column so reliability stays explicit.
-*   The user picks $R$ (70/80/90/95%); the optimiser finds the least-cost build meeting it.
+*   The user picks $R$ (70/80/85/90%); the optimiser finds the least-cost build meeting it.
+    Targets above the ~94% battery-only ceiling (§11) are infeasible and flagged with a warning.
 
 This replaces the v4 definition, where load silently dropped during deficits still counted
 as "renewable," inflating the RE fraction by ~8 points.
@@ -915,7 +917,7 @@ The factor $-\sigma^2/2$ makes the draws mean-preserving: $E[\tilde{c}] = c$. Th
 | `n_mc_weather` | 50 | Yes | Synthetic weather years (more than v4's 30: Dunkelflaute widens tails) |
 | `grid_steps` | 21 | Yes | Per-axis steps; total = $21^3 = 9{,}261$ (v5.1: was 15) |
 | `c_sol_max` | 18× (US), 22× (EU) | Yes | Sized so the grid resolves the real optima and firm high-RE doesn't bind (§8.4) |
-| `c_win_max` | 18× (US), 20× (EU) | Yes | Firm (no-shed) high-RE is wind-heavy (EU 95% → ~15×) |
+| `c_win_max` | 18× (US), 20× (EU) | Yes | Firm (no-shed) high-RE is wind-heavy (EU 90% → ~5×; ≥95% infeasible) |
 | `storage_hours_max` | 60h (US & EU) | Yes | Optima ~5–9h; far below the bound |
 | `wind_solar_corr` | 0.0 (US), −0.35 (EU) | Yes | Contemporaneous copula ρ |
 | `syn_loading` | 0.50 | Yes | Synoptic factor loading λ (§4.6) |
@@ -936,36 +938,43 @@ numbers for any valuable datacenter. (Tables regenerated from the export via
 
 | RE target | 2025 ($/MWh) | 2030 | 2035 | 2040 | vs gas 2025 | Crossover |
 |-----------|-------------|------|------|------|-------------|-----------|
-| 70% | 73.9 | 58.3 | 48.5 | 40.4 | +61% | ~2036 |
-| 80% | 83.4 | 61.0 | 48.4 | 40.4 | +81% | ~2036 |
-| 85% | 92.3 | 68.4 | 54.8 | 45.6 | +100% | ~2040 |
-| 90% | 126.4 | 94.1 | 75.3 | 62.2 | +174% | >2040 |
-| 95% | 156.8 | 124.9 | 110.2 | 94.5 | +240% | >2040 |
+| 70% | 73.9 | 58.5 | 49.3 | 40.4 | +61% | ~2037 |
+| 80% | 83.4 | 60.9 | 48.6 | 40.5 | +81% | ~2036 |
+| 85% | 92.3 | 68.4 | 55.1 | 45.6 | +100% | ~2040 |
+| 90% | 126.4 | 94.7 | 75.3 | 62.4 | +174% | >2040 |
 | **Gas** | **46.1** | **46.1** | **46.1** | **46.1** | — | — |
 
 High-RE US still never beats gas within the horizon — cheap untaxed gas ($4/MMBtu → ~$46/MWh
 even at a 9% WACC) is a very low baseline, and high-RE needs heavy wind overbuild to ride out
 multi-day lulls. With the v5.5 CF-consistent resource the moderate-RE builds need less
-overbuild, so **70–80% RE now reach parity ~2036 and 85% ~2040**; 90%+ remains >2040.
+overbuild, so **70–80% RE now reach parity ~2036–37 and 85% ~2040**; 90% remains >2040.
+
+**95% RE is omitted: it is infeasible for a firm, battery-only off-grid system.** Over the
+whole 21³ build grid the maximum achievable annual RE fraction is ≈**0.94 (EU)** / ≈**0.95 (US)**:
+in a multi-day Dunkelflaute neither sun nor wind produces, and the $\min(1,4/B)$ battery
+power de-rating (§5.4) means a long-duration battery cannot deliver enough *power* to bridge
+days, so a few percent of annual energy always falls to gas regardless of overbuild. Pushing
+past ~94% needs long-duration storage or H₂ firming — the `--ldes` / `--firming h2` overlays
+(§7.5, fig6). The optimiser now emits an explicit `[WARN] … INFEASIBLE` if a requested target
+exceeds this ceiling, rather than silently reporting the penalty-saturated point.
 
 ### Europe — Firm (always-on)
 
 | RE target | 2025 ($/MWh) | 2030 | 2035 | 2040 | vs gas 2025 | Crossover |
 |-----------|-------------|------|------|------|-------------|-----------|
-| 70% | 98.6 | 85.3 | 78.2 | 72.0 | −13% | **~2025** |
-| 80% | 107.3 | 87.4 | 79.7 | 74.3 | −6% | **~2025** |
-| 85% | 118.5 | 92.8 | 82.0 | 74.4 | +4% | **~2026** |
-| 90% | 156.1 | 119.9 | 101.5 | 88.0 | +37% | **~2029** |
-| 95% | 180.3 | 154.9 | 132.7 | 120.7 | +59% | **~2033** |
+| 70% | 98.6 | 85.4 | 78.5 | 72.0 | −13% | **~2025** |
+| 80% | 107.3 | 87.4 | 79.8 | 74.3 | −6% | **~2025** |
+| 85% | 118.5 | 92.8 | 82.1 | 74.7 | +4% | **~2026** |
+| 90% | 156.1 | 120.1 | 101.8 | 88.0 | +37% | **~2029** |
 | **Gas** | **113.8** | **125.2** | **148.3** | **162.6** | — | — |
 
 EU gas is expensive and rising (carbon → logistic path toward $200/tCO₂). An always-on RE
-datacenter beats gas from ~2025 at 70–80% RE; **90% RE reaches parity ~2029, 95% ~2033** under
-the v5.5 CF recalibration (vs ~2033 / ~2035 before). The earlier history still holds — v4
-claimed "90% parity Q2 2025", and the honesty fixes (no free load-shedding, multi-day
-Dunkelflaute, a resolved optimiser, no free demand-deferral) pushed that out to the 2030s; v5.5
-then corrects the *opposite* error (a CF below the imported cost basis) and pulls 90% back to
-the late 2020s.
+datacenter beats gas from ~2025 at 70–80% RE; **90% RE reaches parity ~2029** under the v5.5 CF
+recalibration (vs ~2033 before). The earlier history still holds — v4 claimed "90% parity
+Q2 2025", and the honesty fixes (no free load-shedding, multi-day Dunkelflaute, a resolved
+optimiser, no free demand-deferral) pushed that out to the 2030s; v5.5 then corrects the
+*opposite* error (a CF below the imported cost basis) and pulls 90% back to the late 2020s.
+(95% RE omitted — infeasible for the battery-only firm system, see the US note above.)
 
 **Optimal EU 90% RE build (2025):** ≈ **6.4× solar + 5.0× wind + 6h storage** — roughly half
 the nameplate overbuild of the pre-v5.5 ~11× solar + 10× wind, because the CF-consistent
@@ -1060,7 +1069,8 @@ headline resource, so it defines the published numbers.)
 Treat this as a **stylised techno-economic model: trust directional comparisons, not absolute
 numbers to better than ~±20–30%.** Robust conclusions: cheap untaxed US gas is hard to beat at
 high RE (90%+ never crosses), though moderate-RE US reaches parity by the late 2030s; carbon-priced
-EU gas is beatable, with parity moving from ~2025 (70–80% RE) to ~2033–2035 (90–95%);
+EU gas is beatable, with parity moving from ~2025 (70–80% RE) to ~2029 (90% RE); ≥95% RE is
+infeasible for the battery-only firm system (~94% ceiling), needing LDES/H₂ to close;
 high-RE economics are overbuild-and-gas-dominated, not battery-dominated; and demand
 flexibility only helps when compute is worth less than gas — i.e. rarely for premium AI. Not to
 be trusted as precise: specific parity *years* and $/MWh (synthetic uncalibrated weather, my own

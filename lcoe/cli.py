@@ -161,7 +161,7 @@ def main(argv=None):
             pen = args.shed_penalty if args.shed_penalty is not None else wl.shed_penalty_mwh
             wl = WorkloadProfile(f"custom {ifrac:.0%} @ ${pen:.0f}",
                                  interruptible_fraction=ifrac, shed_penalty_mwh=pen)
-        reliabilities = args.re or [0.70, 0.80, 0.90, 0.95]
+        reliabilities = args.re or [0.70, 0.80, 0.90]
         sys_ov = {}
         if args.grid_steps:
             sys_ov["grid_steps"] = args.grid_steps

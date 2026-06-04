@@ -46,7 +46,7 @@ def run_simulation(
     weather_years: Optional[list] = None,
 ) -> Dict:
     if reliabilities is None:
-        reliabilities = [0.80, 0.90, 0.95]
+        reliabilities = [0.80, 0.90]
 
     year_labels = 2025 + np.arange(years + 1)
     cum_sol  = cumulative_capacity(solar,   years)
@@ -256,7 +256,12 @@ def run_full_suite():
     cost of serving it, so premium/AI workloads never shed and collapse to firm.
     The interruptible regime (cheap compute) is explored via `--flex-sweep`.
     """
-    reliabilities = [0.70, 0.80, 0.85, 0.90, 0.95]
+    # NB: 95% RE is omitted — it is infeasible for a firm, battery-only off-grid system.
+    # During a multi-day Dunkelflaute neither sun nor wind produces and the min(1,4/B)
+    # battery power cap can't bridge days, so a few % of annual energy always falls to gas;
+    # the maximum achievable RE is ≈0.94 (EU) / ≈0.95 (US). Pushing past ~94% requires
+    # long-duration storage or H₂ firming — see the --ldes / --firming h2 overlays (fig6).
+    reliabilities = [0.70, 0.80, 0.85, 0.90]
     run_region_key("us", FIRM, reliabilities, prefix="us_firm", seed=42, h2_system=True)
     run_region_key("eu", FIRM, reliabilities, prefix="eu_firm", seed=42, h2_system=True)
     print("\nDone — figures saved in figs/")

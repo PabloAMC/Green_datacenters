@@ -4,7 +4,13 @@ from __future__ import annotations
 from typing import Dict
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 import numpy as np
+
+
+def _year_axis(ax):
+    """Force whole-year integer ticks on a time-axis (no fractional-year labels)."""
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins="auto", steps=[1, 2, 5, 10]))
 
 try:
     import scienceplots  # noqa: F401
@@ -78,6 +84,7 @@ def plot_cost_trajectories(results, region="US"):
     ax.legend(fontsize=9, frameon=True, facecolor="white", framealpha=1)
     ax.text(0.01, 0.01, REFS, transform=ax.transAxes, fontsize=6, va="bottom",
             alpha=0.5, family="monospace")
+    _year_axis(ax)
     fig.tight_layout(); return fig
 
 
@@ -121,6 +128,8 @@ def plot_optimal_mix(results, region="US"):
     axes[1].set(xlabel="Year", ylabel="Wind overbuild (×load)", ylim=(0,None), title="Wind")
     axes[2].set(xlabel="Year", ylabel="Storage duration (h)", ylim=(0,None), title="Battery")
     axes[0].legend(fontsize=9, title="RE target")
+    for a in axes:
+        _year_axis(a)
     fig.suptitle(f"Optimal capacity mix — {region}", fontsize=12)
     fig.tight_layout(); return fig
 
@@ -162,6 +171,7 @@ def plot_component_breakdown(results, reliability=0.90, region="US"):
               title="solid = capex · hatched = O&M / fuel")
     ax.text(0.01, 0.01, REFS, transform=ax.transAxes, fontsize=6, va="bottom",
             alpha=0.5, family="monospace")
+    _year_axis(ax)
     fig.tight_layout(); return fig
 
 
@@ -199,6 +209,7 @@ def plot_h2_breakdown(results, region="US"):
               bbox_to_anchor=(1.01, 1.0), title="solid = capex · hatched = O&M / fuel")
     ax.text(0.01, 0.01, REFS + " · Lazard LCOH v4.0", transform=ax.transAxes,
             fontsize=6, va="bottom", alpha=0.5, family="monospace")
+    _year_axis(ax)
     fig.tight_layout(); return fig
 
 
@@ -322,4 +333,5 @@ def plot_firming_comparison(result: Dict) -> "plt.Figure":
     ax.legend(fontsize=8, frameon=True, facecolor="white", loc="upper right")
     ax.text(0.01, 0.01, REFS, transform=ax.transAxes, fontsize=6, va="bottom",
             alpha=0.5, family="monospace")
+    _year_axis(ax)
     fig.tight_layout(); return fig

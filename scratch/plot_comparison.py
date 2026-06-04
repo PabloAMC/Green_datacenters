@@ -97,6 +97,8 @@ def main():
     
     ax.set_xlim(yrs[0], yrs[-1])
     ax.set_ylim(0, 180)
+    from matplotlib.ticker import MaxNLocator
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True, steps=[1, 2, 5, 10]))
     
     ax.legend(fontsize=9, frameon=True, facecolor="white", framealpha=1, loc="upper right")
     
