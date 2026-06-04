@@ -2,7 +2,7 @@
 # Override the interpreter with e.g.:  make test PYTHON=.venv/bin/python
 PYTHON ?= python
 
-.PHONY: help install install-lock test reproduce tables check-docs check clean
+.PHONY: help install install-lock test reproduce tables report check-docs check clean
 
 help:
 	@echo "Targets:"
@@ -11,6 +11,7 @@ help:
 	@echo "  test          run the regression + unit suite"
 	@echo "  reproduce     regenerate all figures + output/ JSON/CSV from scratch (firm suite)"
 	@echo "  tables        print the §11 doc tables from output/ (paste-ready)"
+	@echo "  report        build the GitHub Pages site (docs/index.html) from output/ + figs"
 	@echo "  check-docs    fail if the committed doc tables drift from output/"
 	@echo "  check         test + check-docs (what CI runs)"
 	@echo "  clean         remove generated figures, CLI outputs, caches"
@@ -29,6 +30,9 @@ reproduce:
 
 tables:
 	$(PYTHON) tools/regen_doc_tables.py
+
+report:
+	$(PYTHON) tools/build_report.py
 
 check-docs:
 	$(PYTHON) tools/check_doc_tables.py
