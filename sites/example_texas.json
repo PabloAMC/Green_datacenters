@@ -1,0 +1,14 @@
+{
+  "label": "Texas (ERCOT) — example",
+  "based_on": "us",
+
+  "mean_irr": 5.8,
+  "mean_wind_ms": 8.5,
+
+  "gas_price_mmbtu": 3.2,
+  "carbon_price_today": 0.0,
+
+  "wind_solar_corr": 0.0,
+  "n_sites": 3,
+  "site_synoptic_corr": 0.6
+}

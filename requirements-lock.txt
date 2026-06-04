@@ -1,0 +1,7 @@
+# Exactly-reproducible environment — the versions the model is *verified* against
+# (June 2026, Python 3.10+). Use this for byte-for-byte reproduction of the committed
+# figures/tables:  pip install -r requirements-lock.txt
+# For ordinary use, requirements.txt (floors) is fine.
+numpy==2.4.6
+scipy==1.17.1
+matplotlib==3.10.9

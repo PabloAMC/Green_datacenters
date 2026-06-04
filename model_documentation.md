@@ -1,9 +1,116 @@
 # Off-grid Datacenter LCOE Model — Technical Documentation
 
-**Model version:** v5.5  
+**Model version:** v5.6  
 **Code file:** `lcoe/` package (entry point `datacenter_lcoe.py`)  
 **Last verified:** June 2026  
 **All numerical values cross-checked against model output (`output/*_results.json`)**
+
+> **New here? Read this first.** This is the *technical reference* — every equation,
+> parameter, and data source behind the model. You do **not** need to read it top to
+> bottom or follow every derivation. For the plain-language story and headline numbers,
+> start with [`README.md`](README.md). Here, §1 is the overview, and each of the harder
+> sections below opens with an *Intuition* line that states the idea in words before any
+> math. Power-systems or energy-finance background helps but isn't required: the one
+> load-bearing concept is that a generator's cost (its **LCOE**) is its capital plus
+> running cost spread over the energy it actually produces — so *how much it produces*
+> (its **capacity factor**) and *what it costs* are two sides of the same coin.
+
+### How the model works, end to end
+
+The model answers one question: *what is the cheapest way to run an always-on, off-grid
+datacenter on mostly-renewable power, and in what year does that beat simply burning
+gas?* It gets there in five steps, each a section below:
+
+1. **Project technology costs forward** (§3) — solar, wind and batteries get cheaper as
+   the world builds more of them (Wright's Law learning curves), giving a cost for every
+   year from 2025 to 2040.
+2. **Generate a year of weather** (§4) — synthetic but realistic hour-by-hour solar and
+   wind output, including the multi-day wind-and-sun lulls ("Dunkelflaute") that
+   high-renewable systems live or die by. (Real ERA5/NSRDB weather can be dropped in
+   unchanged.)
+3. **Simulate dispatch** (§5) — for a given build (how much solar, wind, and battery),
+   step through all 8,760 hours of the year: renewables serve the load first, the battery
+   fills the gaps, and gas covers whatever is left. This yields the renewable share and
+   the gas burned.
+4. **Cost the build and find the cheapest one** (§6–§8) — price each component, then
+   search for the least-cost build that still hits the target renewable fraction, using a
+   fast optimiser over a precomputed grid of builds.
+5. **Quantify uncertainty** (§9) — over weather years and cost assumptions, plus the
+   optional sensitivity analyses (flexibility, resource quality, tornado; §7.5–7.6, §9).
+
+The output is a delivered cost in dollars per megawatt-hour ($/MWh) for each year and
+each target renewable fraction — and the year that cost crosses below the gas baseline.
+
+---
+
+## Table of Contents
+
+1. [Overview and scope](#1-overview-and-scope)
+   — *then [Version history & rationale](#version-history--rationale) (skippable on a first read)*
+2. [Decision variables and optimisation](#2-decision-variables-and-optimisation)
+3. [Cost learning curves — Wright's Law](#3-cost-learning-curves--wrights-law)
+4. [Weather generation](#4-weather-generation)
+5. [Chronological dispatch](#5-chronological-dispatch)
+6. [Battery degradation, augmentation, and cost](#6-battery-degradation-augmentation-and-cost)
+7. [Gas backup cost and carbon trajectory](#7-gas-backup-cost-and-carbon-trajectory)
+8. [System LCOE and 3D optimisation](#8-system-lcoe-and-3d-optimisation)
+9. [Monte Carlo uncertainty](#9-monte-carlo-uncertainty)
+10. [Parameter tables](#10-parameter-tables)
+11. [Key results](#11-key-results)
+12. [Known limitations](#12-known-limitations)
+13. [References](#13-references)
+
+---
+
+## 1. Overview and Scope
+
+This model computes the least-cost combination of solar PV, onshore wind, battery storage, and gas backup to power an off-grid datacenter at a user-specified renewable energy fraction. The system is fully off-grid — no grid import is available.
+
+**What the model does:**
+- Optimises over three continuous variables: solar overbuild $C_{\text{sol}}$, wind overbuild $C_{\text{win}}$, and battery storage duration $B$ — simultaneously for the first time in v4.
+- Projects cost trajectories from 2025 to 2040 using Wright's Law learning curves.
+- Quantifies uncertainty via Monte Carlo over both stochastic weather and capex parameters.
+- Accounts for battery degradation via capacity augmentation (throughput-cycled), holding usable capacity at nameplate.
+- Defaults to a **firm (always-on)** datacenter with gas backup sized to 100% of load, and optionally models interruptible workloads that shed load only when the value of lost compute is below the gas variable cost (§5.5).
+- Covers two regions (US, EU) with region-specific resource, gas price/carbon, and battery soft-costs.
+- Uses dynamic backup generator capacity sizing (firm → 100% of load).
+
+**Normalisation:** All quantities are per MW of constant datacenter load. Delivered costs are in real 2025 USD per MWh of load served.
+
+---
+
+## Version history & rationale
+
+*Most recent first. This is a changelog of what each model version changed and why; safe to skip on a first read — the methodology it refers to is documented in the sections below.*
+
+**v5.6 — geographic diversification, real-weather pipeline, config-driven sites
+(all opt-in; headline numbers unchanged).** Three usability/fidelity additions that the
+default suite does **not** trigger, so all v5.5 results reproduce bit-for-bit. (a)
+**Spatial diversification** (§4.7): `n_sites`>1 portfolio-averages over geographically
+separated sites that share the regional Dunkelflaute factor with pairwise correlation
+`site_synoptic_corr`, preserving the mean CF exactly while softening the multi-day lulls
+that dominate high-RE cost — a large effect (~40% off EU 90%-RE delivered cost for 3–5
+sites). `n_sites=1` (default) reduces byte-for-byte to the single-site generator. This
+closes the §12 "largest *directional* bias". (b) **Real-weather pipeline**: the v5.5
+reanalysis seam is now wired end to end — `--weather PATH.npz` drives the dispatch with
+measured ERA5/NSRDB years, and `tools/ingest_weather.py` builds that file from provider
+data (documented ERA5/NSRDB→CF recipe; `demo` mode for a try-out). (c) **Config-driven
+sites**: `--site PATH.json` (`load_site_config`) describes a new geography as a data file
+that inherits a built-in region's defaults and overrides only the location-specific knobs
+— so siting a new location is no longer a code change.
+
+Also in v5.6, reproducibility & fidelity tooling (none of it changes the headline): a
+`pyproject.toml` (pip-installable, `datacenter-lcoe` entry point) and a pinned
+`requirements-lock.txt` + `Makefile`; **run provenance** in every JSON export (model
+version, git commit, seed, grid, and a deterministic config hash); a **doc-drift guard**
+(`tools/check_doc_tables.py`) plus GitHub Actions CI that fail if the §11 tables drift from
+`output/`; an **external-validation** test anchoring the cost inputs to published Lazard/EIA
+bands; a **non-flat load profile** (`load_profile`, §5.7; default `flat` = identical) where
+`cooling` adds a temperature-driven PUE overhead so firm gas sizes to peak, not average; and
+a **synoptic calibration tool** (`tools/calibrate_synoptic.py`) that fits φ/λ/ρ/`site_synoptic_corr`
+from real weather, converting the §12 "calibrated, not fitted" caveat into a measured input;
+and a **fig1 geographic/siting band** (§9.3) that shades every trajectory — including the
+gas-free H₂ line, which previously had none — over a poor↔good site for the region.
 
 **v5.5 — capacity-factor ↔ cost-basis consistency, and a reanalysis seam.** The model
 imports Lazard v18 generation LCOEs, which are levelised at Lazard's own capacity factors
@@ -14,7 +121,7 @@ simulated MWh referred to different plants and high-RE overbuild was overstated.
 both halves: a **solar cloud double-count** (the Beta cloud derate was applied on top of an
 already cloud-inclusive $\bar I$; effective CF 0.153→**0.227** US, 0.105→**0.158** EU; §4.1–4.2)
 and a **high-specific-power wind curve** (rated 13→11 m/s, cut-in 3.5→3.0; CF 0.22→**0.33**
-US, 0.18→**0.28** EU; §4.4–4.5). The US CFs and EU wind now sit inside Lazard's CF bands;
+US, 0.18→**0.29** EU; §4.4–4.5). The US CFs and EU wind now sit inside Lazard's CF bands;
 EU solar (0.158) sits just below the US band, consistent with its weaker irradiance and its
 own EU-specific LCOE basis (§4.2). Net: high-RE
 delivered LCOE falls ~20–30% and parity moves earlier — **EU 90% RE ≈ 2029;
@@ -65,41 +172,6 @@ v5.1 right-sized the optimiser grid (§8.4) and added a boundary-binding guard.
 
 ---
 
-## Table of Contents
-
-1. [Overview and scope](#1-overview-and-scope)
-2. [Decision variables and optimisation](#2-decision-variables-and-optimisation)
-3. [Cost learning curves — Wright's Law](#3-cost-learning-curves--wrights-law)
-4. [Weather generation](#4-weather-generation)
-5. [Chronological dispatch](#5-chronological-dispatch)
-6. [Battery degradation, augmentation, and cost](#6-battery-degradation-augmentation-and-cost)
-7. [Gas backup cost and carbon trajectory](#7-gas-backup-cost-and-carbon-trajectory)
-8. [System LCOE and 3D optimisation](#8-system-lcoe-and-3d-optimisation)
-9. [Monte Carlo uncertainty](#9-monte-carlo-uncertainty)
-10. [Parameter tables](#10-parameter-tables)
-11. [Key results](#11-key-results)
-12. [Known limitations](#12-known-limitations)
-13. [References](#13-references)
-
----
-
-## 1. Overview and Scope
-
-This model computes the least-cost combination of solar PV, onshore wind, battery storage, and gas backup to power an off-grid datacenter at a user-specified renewable energy fraction. The system is fully off-grid — no grid import is available.
-
-**What the model does:**
-- Optimises over three continuous variables: solar overbuild $C_{\text{sol}}$, wind overbuild $C_{\text{win}}$, and battery storage duration $B$ — simultaneously for the first time in v4.
-- Projects cost trajectories from 2025 to 2040 using Wright's Law learning curves.
-- Quantifies uncertainty via Monte Carlo over both stochastic weather and capex parameters.
-- Accounts for battery degradation via capacity augmentation (throughput-cycled), holding usable capacity at nameplate.
-- Defaults to a **firm (always-on)** datacenter with gas backup sized to 100% of load, and optionally models interruptible workloads that shed load only when the value of lost compute is below the gas variable cost (§5.5).
-- Covers two regions (US, EU) with region-specific resource, gas price/carbon, and battery soft-costs.
-- Uses dynamic backup generator capacity sizing (firm → 100% of load).
-
-**Normalisation:** All quantities are per MW of constant datacenter load. Delivered costs are in real 2025 USD per MWh of load served.
-
----
-
 ## 2. Decision Variables and Optimisation
 
 ### Decision variables
@@ -123,6 +195,12 @@ $$\text{subject to} \quad f_{\text{RE}}(C_{\text{sol}}, C_{\text{win}}, B) \geq 
 where $R$ is the user-specified minimum renewable energy fraction and $f_{\text{RE}} = 1 - f_{\text{gas}}$ is the energy-based renewable fraction from dispatch.
 
 ### Solution method
+
+*Intuition: re-running an 8,760-hour dispatch for every candidate build would be far too
+slow to search over, so we run it **once** on a dense grid of builds, cache the result, and
+then let a standard hill-climbing optimiser interpolate within that cached surface to find
+the cheapest build that still meets the renewable target. "Multi-start" just means we try
+several starting points so a single bad start can't trap us in a local minimum.*
 
 The 3D optimisation is solved by multi-start Nelder-Mead with six starting points. The objective function evaluates via trilinear interpolation into a precomputed $21^3 = 9{,}261$-scenario dispatch surface (v5.1; §8.4), making each evaluation near-instantaneous.
 
@@ -149,6 +227,14 @@ optima interior. Even at that bound the firm battery-only system tops out at ≈
 ---
 
 ## 3. Cost Learning Curves — Wright's Law
+
+*Intuition: technologies that are manufactured (panels, turbines, battery cells) get reliably
+cheaper the more of them the world has ever built — historically by a roughly fixed percentage
+for every **doubling** of cumulative production. That empirical regularity is Wright's Law. So to
+get a cost for, say, 2035, we project how much total capacity will be installed by then, count
+the doublings since today, and apply the per-doubling cost decline. This is what makes the future
+cheaper than today in the model — and why solar (a fast-growing, fast-learning technology) falls
+furthest.*
 
 ### Cumulative capacity trajectory
 
@@ -257,6 +343,15 @@ deep overbuild to cover every hour and so costs more (US ≈$115→$82, EU ≈$1
 
 ## 4. Weather Generation
 
+*Intuition for the whole section: the model needs a realistic year of hour-by-hour sun and
+wind. The hard part isn't the daily rhythm (day/night, summer/winter) — it's getting the
+**bad stretches** right: cloudy weeks, calm weeks, and especially the multi-day spells when
+sun **and** wind are low at the same time (Dunkelflaute, §4.6), because those are what a
+renewable system must store or back up against. So §4 builds the averages first (§4.1–4.2,
+4.4–4.5), then layers on realistic clustering and sun↔wind correlation (§4.3, §4.6) **without
+disturbing those averages** — the recurring phrase "marginals/CFs preserved" means exactly
+that: we change* when *the energy is scarce, not* how much *there is on average.*
+
 ### 4.1 Solar — clear-sky profile
 
 The deterministic 8760-hour clear-sky trace:
@@ -310,6 +405,13 @@ holds region by region. For clear, arid sites (US Southwest, Spain), raise $\bar
 
 ### 4.3 Solar-wind Gaussian copula correlation
 
+*Intuition: in Northern Europe, overcast days tend to be windier and clear days calmer
+(both driven by cyclonic weather). We want to reproduce that **co-movement** between sun and
+wind without changing how often clouds or winds of any given strength occur on their own. A
+**copula** is the standard statistical tool for precisely this: draw two correlated normal
+"dial settings", then map each through its own target distribution (Beta for cloud, Weibull
+for wind). The correlation $\rho$ couples them; the individual distributions are untouched.*
+
 The daily cloud draw $\xi_d^*$ and daily wind level are coupled via a Gaussian copula. Two standard normals $(Z_1, Z_2)$ are drawn with correlation $\rho$:
 
 $$Z_1, Z_2 \sim \mathcal{N}\!\left(\begin{pmatrix}0\\0\end{pmatrix}, \begin{pmatrix}1 & \rho \\ \rho & 1\end{pmatrix}\right) \qquad \text{via Cholesky: } Z_2 = \rho Z_1 + \sqrt{1-\rho^2}\,\varepsilon$$
@@ -328,6 +430,15 @@ When $\rho < 0$ (Northern Europe): clear-sky days $(Z_1 > 0)$ tend to coincide w
 **v5 note.** $\rho$ is now the *contemporaneous* (same-day) correlation, realised as the **residual** part of the two-factor model in §4.6: a persistent synoptic factor loads positively on both wind and solar (creating joint multi-day lows), while the residual pair carries the cyclonic $\rho<0$. The net same-day correlation still equals $\rho$.
 
 ### 4.4 Wind — mean-reverting AR(1)-on-quantiles model
+
+*Intuition: wind is "sticky" — a calm hour is likely followed by another calm hour. We need
+that stickiness, but a naïve way of adding it would quietly lower the turbine's average output
+(because power grows with the cube of wind speed, so the swings matter). The fix: add the
+stickiness in a transformed, well-behaved "normal" space, then map back to the real wind-speed
+distribution. That keeps the long-run capacity factor **exactly** fixed no matter how sticky we
+make it — and lets the stickiness span days, not just hours, so multi-day calm spells actually
+appear. "AR(1)" is just "today is a weighted blend of yesterday plus fresh randomness"; doing it
+"on quantiles" is the map-to-normal-and-back trick.*
 
 **Key design choice (v4, retained):** The AR(1) process operates in standard-normal space, then transforms back to the Weibull marginal. This preserves the exact Weibull capacity factor regardless of the autocorrelation parameter $\rho_w$ — resolving a v3 bug where AR(1) in speed space reduced wind CF by ~42% via Jensen's inequality on the cubic power curve.
 
@@ -352,12 +463,12 @@ $$u_h = \Phi(z_h) \qquad v_h = c \cdot (-\ln(1-u_h))^{1/k}, \qquad k=2.1,\; c = 
 | Region | $\bar{v}$ (m/s) | Simulated CF (v5.5) |
 |--------|-----------------|---------------------|
 | US | 7.5 | **0.328** |
-| EU | 7.0 | **0.281** |
+| EU | 7.0 | **0.289** |
 
 **v5.5 — modern turbine.** The rated speed was lowered 13.0 → 11.0 m/s (cut-in 3.5 → 3.0;
 §4.5) to represent a modern **low-specific-power** onshore turbine (large rotor per rated
 kW), which is what utility fleets — and the Lazard onshore wind $/MWh — now assume. This
-lifts simulated CF from ≈0.22 to **0.33 (US) / 0.28 (EU)**, inside Lazard v18's onshore CF
+lifts simulated CF from ≈0.22 to **0.33 (US) / 0.29 (EU)**, inside Lazard v18's onshore CF
 basis (0.30–0.55) the wind LCOE is levelised at. The old 13 m/s curve (CF ≈0.22) was a
 high-specific-power machine, inconsistent with the imported cost.
 
@@ -378,6 +489,15 @@ machine or a stronger/weaker resource can be modelled without code changes.
 
 ### 4.6 Synoptic "Dunkelflaute" factor (v5)
 
+*Intuition: the thing that actually breaks a high-renewable system isn't one dark hour — it's
+a weather system that parks low sun **and** low wind over the whole region for days on end (a
+"Dunkelflaute"). To create those, we add a single shared, slow-moving "synoptic" factor $f_d$
+that nudges both sun and wind in the same direction together; when it dips for a week, both
+sag for a week. Each source then gets its own independent noise on top. The shared factor's
+**persistence** ($\varphi$) sets how long a spell lasts; its **loading** ($\lambda$) sets how
+tightly sun and wind move together. Crucially the long-run averages are unchanged — we've only
+made the scarce periods cluster into realistic multi-day events instead of scattering randomly.*
+
 Persistent multi-day periods of *simultaneously* low wind **and** low sun (Dunkelflaute) are the dominant driver of storage/backup sizing at high RE — and were essentially absent from v4 (daily-independent clouds, ~4h wind memory, and an EU copula that actively paired low-sun with *high* wind). v5 adds a daily-scale latent **two-factor** model:
 
 $$f_d = \varphi\, f_{d-1} + \sqrt{1-\varphi^2}\,\eta_d \quad (\text{common synoptic factor, } f_d\sim\mathcal N(0,1))$$
@@ -397,9 +517,59 @@ chosen so $\text{corr}(z_1,z_2)=\rho$ exactly (validity requires $\lambda^2 \le 
 
 **Verified effect (8-year EU sample, 5× solar + 4× wind):** the longest spell with 24h-average generation below load grows from ~203h (no synoptic factor) to ~324h mean / 562h max — i.e. realistic week-scale lulls now appear — while $\overline{\text{CF}}_{\text{sol}}$ and $\overline{\text{CF}}_{\text{win}}$ are unchanged to within Monte-Carlo noise.
 
+### 4.7 Spatial diversification — geographic portfolio (`n_sites`)
+
+*Intuition: a real high-RE operator does not build on one patch of ground; it spreads
+generation across sites. Dunkelflaute is synoptic-scale, so sites in a region experience
+it largely together — but not perfectly, and the partial decorrelation is exactly what
+makes a portfolio more reliable than any single site. The §4.1–4.6 model is single-site
+(`n_sites=1`), which §12 flags as the largest **directional** bias in the headline; this
+section adds the knob that removes it.*
+
+The portfolio (`weather.generate_weather_portfolio`) builds $N=$ `n_sites` sites that
+**share one regional synoptic factor** $f^{\text{common}}_d$ (the §4.6 AR(1) process) and
+combine it with an independent per-site part:
+
+$$f^{(i)}_d = \sqrt{c}\;f^{\text{common}}_d + \sqrt{1-c}\;f^{(i),\text{indep}}_d,\qquad
+c = \texttt{site\_synoptic\_corr}\in[0,1]$$
+
+so any two sites have synoptic correlation $c$ while each $f^{(i)}$ keeps the same
+AR(1)$(\varphi)$ law. Each site then runs the full §4.1–4.6 machinery (independent local
+cloud and wind residuals), and the portfolio CF is the **average** of the $N$ site traces.
+
+Two properties make this safe and meaningful:
+
+- **Mean CF is preserved exactly** ($E[\text{avg}] = $ single-site mean), so the
+  imported-LCOE cost basis (§4.2, the v5.5 CF-consistency invariant) is untouched. Only
+  the *variance/clustering* of the lows changes — which is precisely what sizes high-RE
+  storage and backup.
+- **`n_sites=1` reduces byte-for-byte to §4.1–4.6** (identical RNG draw order), so the
+  default model — and every published number — is unchanged. The shipped default is
+  `n_sites=1`; diversification is strictly opt-in (`--sites`).
+
+$c\to1$ ⇒ coincident sites ⇒ no smoothing; $c\to0$ ⇒ independent sites ⇒ maximal
+(optimistic) smoothing. The default $c=0.7$ is deliberately conservative about how much
+diversification helps, since real intra-region sites are strongly coupled.
+
+**Verified effect (EU 90% RE, firm, 2025; reduced-fidelity grid).** The deepest 3-day
+generation lull rises from ≈0.46 (single site) to ≈0.73 (3 sites) to ≈0.87 (6 sites) of
+load, and the delivered LCOE falls from ≈\$161/MWh (single site) to ≈\$98 (3 sites, $c{=}0.6$)
+to ≈\$91 (5 sites, $c{=}0.5$) — a ~40% reduction — with mean solar/wind CF unchanged to
+±0.001. **Caveat:** like the synoptic factor itself (§12), $c$ is calibrated, not fitted —
+treat the *direction and rough magnitude* as robust and the exact figure as dependent on
+the inter-site correlation, which should be set from reanalysis for a specific portfolio.
+
 ---
 
 ## 5. Chronological Dispatch
+
+*Intuition: "dispatch" is just bookkeeping the year hour by hour, in order. Each hour, compare
+renewable output to load: if there's a surplus, charge the battery (and spill the rest); if
+there's a deficit, drain the battery, and if that's not enough, burn gas. Doing it **in
+chronological order** matters — yesterday's clouds leave the battery empty for today's, which a
+simple averaging approach would miss. Run all 8,760 hours and you learn the two things the cost
+model needs: what fraction of the year's energy came from gas, and how big the worst single-hour
+gap was (which sizes the gas plant).*
 
 ### 5.1 3D precomputed grid
 
@@ -515,9 +685,33 @@ from solar + wind + battery, and at most 10% from the gas backup.** Precisely:
 This replaces the v4 definition, where load silently dropped during deficits still counted
 as "renewable," inflating the RE fraction by ~8 points.
 
+### 5.7 Datacenter load shape (`load_profile`)
+
+The headline normalises load to a **constant** 1 MW each hour. v5.6 allows a non-flat shape
+(`weather.load_profile`, `SystemParams.load_profile`, CLI `--load-profile`), kept
+**mean-normalised to 1.0** so it is a *shape*, not a level: the model stays "per MW of average
+load" and every annual $\big/8760$ denominator (gas fraction, delivered cost) is unchanged.
+The hourly balance becomes $\text{net}(t)=G(t)-\ell(t)$ with $\overline{\ell}=1$; `"flat"`
+($\ell\equiv1$) is the default and reduces the dispatch **exactly** to §5.3 (all published
+numbers unchanged).
+
+`"cooling"` adds a temperature-driven cooling (PUE) overhead on a constant IT base — higher
+draw on hot summer afternoons — so **peak load exceeds average** (peak $\approx1.20$). Because
+firm gas is sized to *peak* load (§7), a peaky profile needs a modestly larger gas plant; and
+because the cooling peak coincides with strong midday solar, renewables cover much of it, so
+the annual gas *fraction* barely moves. The effect is opt-in and small; the point is that load
+shape is now a first-class, adjustable input rather than a hidden "flat" assumption.
+
 ---
 
 ## 6. Battery Degradation, Augmentation, and Cost
+
+*Intuition: a battery wears out two ways — just by getting older (calendar fade) and by being
+cycled (throughput fade) — so a pack slowly loses usable capacity. Rather than rip out and
+replace the whole system mid-life, the operator **augments**: each year it adds just enough new
+cells to offset that year's fade, holding capacity at nameplate. That's both standard industry
+practice and cheaper, and it's why the delivered battery cost (§6.4–6.5) comes out ~30% below a
+full-replacement assumption.*
 
 ### 6.1 LFP degradation model
 
@@ -589,6 +783,14 @@ These are ~30–35% below the v5.3 full-replacement figures (e.g. 4h US $20.2 �
 ---
 
 ## 7. Gas Backup Cost and Carbon Trajectory
+
+*Intuition: gas is the backstop that makes the datacenter "firm" (never goes dark). Its cost per
+delivered MWh has three parts — the plant's capital (spread over how little it runs), the fuel it
+burns, and a carbon price on its emissions. A plant that runs a lot wants to be efficient and is
+worth building well (CCGT); one that fires only rarely wants to be cheap to build even if
+thirsty to run (OCGT peaker) — so §7.1 picks whichever suits the duty. In Europe a rising carbon
+price (§7.3) steadily makes this backstop more expensive, which is the main reason renewables win
+there sooner than in the US.*
 
 ### 7.1 Technology selection
 
@@ -733,7 +935,10 @@ market-H₂ price multipliers** to stress the deep-lull spike.
 
 **Finding (EU, 2035, self-produced-H₂ tanks).** Co-optimising is **much cheaper than the
 greedy overlay**: ~**$104/MWh** for a fully gas-free, zero-carbon, firm datacenter — vs
-~$150 greedy and ~$182 for the v5.4 gas-backed 90%-RE build. Crucially the optimal *shape*
+~$150 greedy, and about level with the current (v5.5) gas-backed 90%-RE build (~$102, §11),
+so for roughly the cost of a 90%-RE-with-gas system you instead get a fully gas-free,
+zero-carbon one. (The pre-v5.5 gas-backed 90%-RE build cost ~$182; the v5.5 CF recalibration
+cut it to ~$102.) Crucially the optimal *shape*
 changes: freed from the wind-heavy Dunkelflaute hedge, it goes **solar-heavy + big
 electrolyser** (≈13× solar, ≈2× wind, ≈6 h LFP, **≈1.3 MW electrolyser**, ≈16 h H₂),
 self-producing ~95 % of firming and buying ~5 % from the market — turning cheap surplus
@@ -749,11 +954,14 @@ optimum (`h2_system_trajectory`, reusing the same `dispatch_h2_vec` + cost model
 fixed at 6h, warm-started) as the **"Optimised gas-free H₂ system" line in fig1** and its
 capex/opex **breakdown in fig6** (generation / LFP / electrolyser / H₂ storage / turbine /
 purchased-H₂ — all zero-carbon), with the **pure-gas reference** overlaid on fig6 so the
-zero-carbon system can be read directly against the gas it displaces. The line lands below
-the high-RE-with-gas curves in both regions: a fully-optimised gas-free build is *cheaper*
-than the constrained 90%-RE-with-gas case, because it is free to choose a solar-heavy,
-big-electrolyser mix. EU trajectory: **$158/MWh (2025) → $88 (2040)**, crossing below pure
-gas around 2030–31 as EU carbon climbs.
+zero-carbon system can be read directly against the gas it displaces. The line tracks the
+90%-RE-with-gas curve closely in both regions — a fully-optimised gas-free build delivers at
+roughly the cost of the constrained 90%-RE-with-gas case (and *below* the cost of forcing RE
+past 90% with gas), because it is free to choose a solar-heavy, big-electrolyser mix instead of
+the wind-heavy Dunkelflaute hedge. EU trajectory (from `output/eu_firm_results.json`,
+`h2_system`): **$148/MWh (2025) → $99 (2035) → $85 (2040)**, crossing below pure gas around
+**2029** as EU carbon climbs (US: $138 → $79). These numbers are now exported and
+regenerable (`tools/regen_doc_tables.py`), not hand-transcribed.
 
 *Robustness (verified).* Fixing B_lfp at 6h is benign — letting `run_ldes_joint` choose it
 freely lands at 5.5h (2025) → 6.0h (2040), within 0.5h across the trajectory, and the
@@ -767,6 +975,15 @@ sit interior to their bounds throughout.
 ---
 
 ## 8. System LCOE and 3D Optimisation
+
+*Intuition: this section adds up the bill. The delivered cost is just generation + battery +
+gas, each in dollars per MWh of load served (§8.1–8.2). Two subtleties make the numbers honest.
+First, you pay for **every** MWh a panel or turbine produces, including the surplus you spill on
+sunny days (curtailment) — so overbuild shows up as real cost, captured by charging generation at
+its full cost over its **simulated** output (§8.1). Second, a dollar of solar and a dollar of gas
+aren't financed the same way, so each technology is annualised at its **own** cost of capital and
+asset life (§8.3) rather than one blanket rate — cheaper, patient money for renewables, pricier,
+riskier money for merchant gas.*
 
 ### 8.1 Generation cost
 
@@ -791,7 +1008,7 @@ WACC in their capital-recovery terms; gas plant capex uses the gas WACC over 25 
 | Technology | WACC | Life (yr) | CRF | Rationale |
 |------------|------|-----------|-----|-----------|
 | Solar PV | 5.5% | 30 | 0.0688 | low-risk, long-life infrastructure; contracted revenue |
-| Onshore wind | 5.5% | 25 | 0.0719 | same, slightly shorter life |
+| Onshore wind | 5.5% | 25 | 0.0745 | same, slightly shorter life |
 | LFP battery | 7.0% | 20* | 0.0944 | moderate tech/cycling risk (*replacement horizon, §6) |
 | Gas (CCGT/OCGT) | 9.0% | 25 | 0.1018 | merchant + carbon-policy / stranding risk |
 
@@ -901,6 +1118,21 @@ The factor $-\sigma^2/2$ makes the draws mean-preserving: $E[\tilde{c}] = c$. Th
 | Onshore wind | 0.15 | ±30% |
 | LFP battery | 0.12 | ±25% |
 
+### 9.3 Geographic / siting band (fig1 shading, v5.6)
+
+These §9.2 capex P10–P90 bands are reported in the summary table and the export
+(`lcoe_p10`/`lcoe_p90`). The **shading in fig1**, however, is a different and — for an
+off-grid *siting* decision — more decision-relevant quantity: the **resource/siting
+range**. Each trajectory (every RE target *and* the gas-free H₂ system) is re-optimised at
+a **poor** and a **good** site for the region (`RESOURCE_PRESETS[region]["low"]`/`["good"]`;
+US 4.5↔6.8 kWh/m²/day & 6.5↔9.0 m/s, EU 3.2↔4.6 & 6.0↔8.5), and fig1 shades the min–max
+envelope, with the `default`-resource line drawn as the central case inside it. This is what
+gives the H₂ line a band too (it had none before — its trajectory computes a single central
+value). It is a **range of choices** (where you build), *not* a probabilistic confidence
+interval, and is labelled as such on the figure. Computed only with `resource_band=True`
+(the headline suite / CLI `--resource-band`), at reduced MC since it is illustrative; the
+central headline numbers are unchanged.
+
 ---
 
 ## 10. Parameter Tables
@@ -922,6 +1154,16 @@ The factor $-\sigma^2/2$ makes the draws mean-preserving: $E[\tilde{c}] = c$. Th
 | `wind_solar_corr` | 0.0 (US), −0.35 (EU) | Yes | Contemporaneous copula ρ |
 | `syn_loading` | 0.50 | Yes | Synoptic factor loading λ (§4.6) |
 | `syn_persistence` | 0.82 (US), 0.85 (EU) | Yes | Synoptic AR(1) φ; episode length ≈ 1/(1−φ) days |
+| `n_sites` | 1 | Yes | Geographic portfolio size (§4.7); 1 = single-site headline |
+| `site_synoptic_corr` | 0.70 | Yes | Pairwise cross-site Dunkelflaute correlation $c$ (§4.7); used only if `n_sites`>1 |
+
+**Custom sites & real weather (data, not code).** Two seams let a user re-point the model
+without editing source. `load_site_config(path)` (CLI `--site PATH.json`) builds a region
+bundle from a small JSON file that inherits a built-in region's tech/battery/SMR/PPA
+defaults (`based_on`) and overrides only the location-specific knobs (resource, any
+`GasParams` field, any `SystemParams` field above); unknown keys raise. `--weather PATH.npz`
+(loader `weather.load_weather_traces`, builder `tools/ingest_weather.py`) drives the dispatch
+with real ERA5/NSRDB hourly-CF years instead of the synthetic generator (§12).
 
 ---
 
@@ -978,7 +1220,7 @@ optimiser, no free demand-deferral) pushed that out to the 2030s; v5.5 then corr
 
 **Optimal EU 90% RE build (2025):** ≈ **6.4× solar + 5.0× wind + 6h storage** — roughly half
 the nameplate overbuild of the pre-v5.5 ~11× solar + 10× wind, because the CF-consistent
-resource (solar 0.16 / wind 0.28) generates the same energy from far less capacity. Storage
+resource (solar 0.16 / wind 0.29) generates the same energy from far less capacity. Storage
 stays ~6h: the binding constraint is multi-day Dunkelflaute energy, which generation overbuild
 covers more cheaply than batteries.
 
@@ -1015,25 +1257,36 @@ curve. If the guard fires, raise the corresponding `*_max` in `SystemParams`.
 gas fuel+carbon is flat within a year, this is all-or-nothing per (workload, year): a workload
 sheds the full interruptible slice of every gas-residual hour, or none. This (i) creates a
 discontinuity at the threshold and (ii) ignores that shedding also saves gas *capacity*, not
-just fuel — so it slightly under-credits shedding for workloads near the threshold. A
-finer model would shed hour-by-hour on marginal serving cost. The headline FIRM results are
-unaffected (they never shed).
+just fuel — so it slightly under-credits shedding for workloads near the threshold. Note that
+moving the decision *hour-by-hour* would **not** change results here: the marginal serving
+cost (gas fuel+carbon+VOM) is constant within a year, so an hourly rule sheds exactly the
+same hours as the annual one. Hourly shedding only starts to matter once the marginal cost
+varies within the year — e.g. an hourly electricity/gas price or a time-varying carbon signal,
+neither of which this off-grid model carries. The genuinely-missing credit is the gas-capacity
+saving (ii), not the time resolution. The headline FIRM results are unaffected (they never shed).
 
 **Flexibility sweep fidelity.** `--flex-sweep` re-runs the dispatch per (interruptible × shed
 penalty) point at reduced fidelity (coarser grid, fewer MC years) and wider bounds. Treat its
 absolute LCOE as indicative; the *shape* of the trade-off surface is the point.
 
-**Synoptic factor is calibrated, not fitted.** The Dunkelflaute structure (§4.6) uses plausible loadings/persistence ($\lambda=0.5$, $\varphi\approx0.82$–0.85) rather than values fitted to multi-decade ERA5 reanalysis at a specific site. It restores realistic multi-day clustering and correct directionality, but the exact frequency/depth of week-scale lulls — which sets high-RE storage/backup — should be validated against site reanalysis before siting decisions. It is also single-site; geographic aggregation would soften the tails. **This is the single largest accuracy gap** and the highest-value next improvement. v5.5 adds the integration seam for closing it: `ChronologicalSimulator(..., weather_years=...)` (and `weather.load_weather_traces`) dispatches supplied real ERA5/NSRDB hourly CF years instead of the synthetic generator, leaving the optimiser, costing and figures unchanged — so wiring a reanalysis feed is now a data step, not a code change.
+**Synoptic factor is calibrated, not fitted.** The Dunkelflaute structure (§4.6) uses plausible loadings/persistence ($\lambda=0.5$, $\varphi\approx0.82$–0.85) rather than values fitted to multi-decade ERA5 reanalysis at a specific site. It restores realistic multi-day clustering and correct directionality, but the exact frequency/depth of week-scale lulls — which sets high-RE storage/backup — should be validated against site reanalysis before siting decisions. **This is the single largest accuracy gap** and the highest-value next improvement (the single-site assumption is addressed separately by the §4.7 portfolio). `tools/calibrate_synoptic.py` now *fits* λ/φ/ρ (and, for multi-site input, `site_synoptic_corr`) from a real weather `.npz` — a fast moment estimator (monotone, biased toward zero; for ranking and starting values, refine with simulated moments) that converts these from assumptions into measured inputs once a reanalysis feed is wired. The integration seam for closing it is wired end to end: `ChronologicalSimulator(..., weather_years=...)` (CLI `--weather PATH.npz`, loader `weather.load_weather_traces`) dispatches supplied real ERA5/NSRDB hourly CF years instead of the synthetic generator, leaving the optimiser, costing and figures unchanged; and `tools/ingest_weather.py` converts provider data (hourly-CF CSVs, with the documented ERA5/NSRDB → CF recipe) into that `.npz` — so wiring a reanalysis feed is a data step, not a code change.
 
 **Gas CF approximation.** The gas backup LCOE uses $f_{\text{gas}}$ as both the gas plant capacity factor and the energy fraction; capacity capital is separately peak-scaled (firm → 100% of load). Reasonable since dispatch runs gas only when battery (and any shedding) are exhausted.
 
-**Spatial correlation not modelled.** A real portfolio diversifies across multiple wind/solar sites. The model assumes co-located generation (worst-case correlation); diversification would lower effective gas fractions and soften Dunkelflaute.
+**Spatial diversification — now modelled, off by default (§4.7).** The headline assumes a
+*single* co-located site (worst-case correlation). A real portfolio diversifies across
+sites, which softens Dunkelflaute and lowers effective gas fractions — a large effect (≈40%
+off EU 90%-RE delivered cost for 3–5 sites; §4.7). `n_sites`/`--sites` adds a multi-site
+portfolio that preserves the mean CF exactly; it is **opt-in** (default `n_sites=1`), so the
+headline remains single-site. The remaining gap is calibration of the inter-site correlation
+`site_synoptic_corr`, which (like the synoptic factor) should be fitted to reanalysis for a
+specific portfolio rather than assumed.
 
 **Constant load profile.** Datacenter load is flat at $P_{\text{load}}$ MW; sub-hourly variation and maintenance windows are not modelled.
 
 **Gas supply reliability.** Gas is assumed always available at nameplate capacity. A truly off-grid site needs on-site fuel storage or pipeline access; neither constraint is modelled (this would *raise* the firm backup cost and help the RE case).
 
-**Solar CF is conservative.** Beta(3, 1.5) cloud attenuation (mean 0.667) produces US solar CF ≈ 0.15, below typical US utility-scale (0.22–0.28). Appropriate for average-cloudiness sites; for clear/arid sites set `mean_irr=6.5` or higher.
+**Solar resource is an average-site assumption.** The headline irradiance ($\bar I = 5.5$ kWh/m²/day US, 3.8 EU) gives an effective solar CF of **0.227 US / 0.158 EU** (v5.5; §4.2) — the US value sits inside the Lazard utility-scale band (0.20–0.30) and the EU value just below it, consistent with weaker northern-European irradiance. These represent an *average-cloudiness* site; clear/arid sites (US Southwest, Spain) are sunnier, so set `mean_irr=6.5`–7.0 for CF ≈ 0.27–0.29 (see the `good` resource preset and `--resource-sweep`).
 
 **Wind model is land-based.** IEC Class II power curve and Weibull $k=2.1$ (onshore). Offshore would need a separate parameterisation ($k\approx2.5$, lower cut-in, higher rated wind).
 
@@ -1046,7 +1299,7 @@ simulated US solar ≈0.15 / wind ≈0.22, roughly **half** the CF (utility sola
 onshore wind 0.30–0.55) that the Lazard v18 generation LCOEs it imports are quoted at —
 inflating required overbuild and biasing high-RE cost upward. v5.5 fixes both halves: the
 solar cloud **double-count** (effective CF 0.153 → **0.227** US, 0.105 → **0.158** EU) and
-the **wind power curve** (rated 13 → 11 m/s; CF 0.22 → **0.33** US, 0.18 → **0.28** EU).
+the **wind power curve** (rated 13 → 11 m/s; CF 0.22 → **0.33** US, 0.18 → **0.29** EU).
 The US CFs and EU wind now sit inside Lazard's bands; EU solar (0.158) sits just below the US
 solar band and is matched instead to a EU-specific solar LCOE levelised at that lower CF — so
 the imported \$/MWh and the simulated MWh refer to the same plant region by region. Net effect

@@ -6,7 +6,8 @@ from typing import Optional, Tuple
 import numpy as np
 
 from .params import SystemParams, BatteryParams, WorkloadProfile
-from .weather import solar_clearsky, generate_weather_year
+from .weather import (solar_clearsky, generate_weather_year,
+                      generate_weather_portfolio, load_profile)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -40,6 +41,8 @@ class ChronologicalSimulator:
         self.workload  = workload
         self.clearsky  = solar_clearsky(mean_irr)
         self.mean_wind = mean_wind_ms
+        # Datacenter load shape (mean 1.0). "flat" → all-ones → constant-load model.
+        self.load = load_profile(getattr(sys, "load_profile", "flat"))
         # REANALYSIS HOOK (v5.5). `weather_years`, if given, is an explicit list of
         # (solar_cf[8760], wind_cf[8760]) hourly traces — e.g. real ERA5 / NSRDB years
         # loaded via `weather.load_weather_traces` — used INSTEAD of the synthetic
@@ -71,8 +74,13 @@ class ChronologicalSimulator:
                                       np.minimum(1.0, 4.0 / safe_b)))
         self._soc_max = self._bg.copy()
 
-        print(f"  [Sim] {sys.n_mc_weather} MC years × {n_scen} scenarios "
-              f"({ns}³ grid, C_sol 0–{sys.c_sol_max}×, "
+        if self.weather_years is not None:
+            n_years, src = len(self.weather_years), "reanalysis"
+        else:
+            n_years, src = sys.n_mc_weather, "MC"
+        sites = f", {sys.n_sites} sites" if sys.n_sites > 1 and self.weather_years is None else ""
+        print(f"  [Sim] {n_years} {src} years × {n_scen} scenarios "
+              f"({ns}³ grid{sites}, C_sol 0–{sys.c_sol_max}×, "
               f"C_win 0–{sys.c_win_max}×, B 0–{sys.storage_hours_max}h) …")
         (self.gas_mean, self.gas_p90, self.fec_mean, self.gas_peak_mean,
          self.gas_peak_firm_mean, self.drop_mean,
@@ -100,9 +108,10 @@ class ChronologicalSimulator:
         gas_peak = np.zeros(n)        # peak residual AFTER shedding (interruptible case)
         gas_peak_firm = np.zeros(n)   # peak residual with NO shedding (firm backup sizing)
 
+        load = self.load
         for t in range(8760):
             g = self._cs * sol_tr[t] + self._cw * win_tr[t]
-            net     = g - 1.0
+            net     = g - load[t]          # load[t]=1.0 for the flat (default) profile
             deficit = np.maximum(-net, 0.0)
             surplus = np.maximum(net, 0.0)
 
@@ -117,7 +126,7 @@ class ChronologicalSimulator:
             #    Whether this shed is ECONOMIC is decided later in the optimiser
             #    (shed only if compute value < gas variable cost); the dispatch
             #    just records the max-sheddable case and the no-shed (firm) case.
-            shed = np.minimum(flex, deficit)
+            shed = np.minimum(flex * load[t], deficit)   # flex is a share of that hour's load
             drop += shed
             deficit -= shed
 
@@ -164,8 +173,13 @@ class ChronologicalSimulator:
                 sol_tr, win_tr = self.weather_years[i]
                 sol_tr = np.asarray(sol_tr, float); win_tr = np.asarray(win_tr, float)
             else:
-                sol_tr, win_tr = generate_weather_year(
+                # Spatial diversification: portfolio-average over n_sites sites that
+                # share the regional synoptic factor (site_synoptic_corr). n_sites=1
+                # reduces exactly to the single-site generator (draw order preserved).
+                sol_tr, win_tr = generate_weather_portfolio(
                     self.clearsky, self.mean_wind, rng,
+                    n_sites=self.sys.n_sites,
+                    site_synoptic_corr=self.sys.site_synoptic_corr,
                     wind_solar_corr=self.sys.wind_solar_corr,
                     syn_loading=self.sys.syn_loading,
                     syn_persistence=self.sys.syn_persistence,

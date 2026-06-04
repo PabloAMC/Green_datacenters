@@ -10,13 +10,13 @@ import numpy as np
 from .params import (SystemParams, BatteryParams, GasParams, SMRParams,
                      GridPPAParams, WorkloadProfile, TechParams,
                      SOLAR, WIND, BATTERY_US, GAS, SMR, ENTERPRISE,
-                     SYSTEM, FIRM, REGIONS, _sys_with)
+                     SYSTEM, FIRM, REGIONS, MODEL_VERSION, _sys_with, resource_band_for)
 from .costs import (cumulative_capacity, wright_law, rewacc_lcoe,
                     smr_trajectory, grid_ppa_trajectory, grid_cfe_trajectory,
                     gas_pure_lcoe, battery_annualised_cost)
 from .dispatch import ChronologicalSimulator
 from .optimize import optimal_cost_3d, delivered_cost_split
-from .reporting import print_summary, export_results
+from .reporting import print_summary, export_results, git_commit, config_hash
 from .plots import (plot_cost_trajectories, plot_reliability_sensitivity,
                     plot_optimal_mix, plot_component_breakdown, plot_h2_breakdown)
 from .h2system import h2_system_trajectory
@@ -25,6 +25,25 @@ from .h2system import h2_system_trajectory
 # ─────────────────────────────────────────────────────────────────────────────
 # 8. SIMULATION RUNNER
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _delivered_at_resource(mean_irr, mean_wind_ms, solar, wind, battery, gas, sys_band,
+                           workload, seed, Rs, years, lcoe_solar, lcoe_wind,
+                           capex_batt_kwh, capex_batt_kw):
+    """Least-cost delivered trajectory per RE target at one resource level — the building
+    block of the fig1 geographic/siting band. Returns {R: array(years+1)}. No cost-MC
+    (the band is a resource range, not a capex CI), so it is cheap."""
+    sim = ChronologicalSimulator(sys_band, battery, workload, mean_irr, mean_wind_ms, seed)
+    out = {R: np.zeros(years + 1) for R in Rs}
+    for R in Rs:
+        prev_x = None
+        for i in range(years + 1):
+            kw = dict(batt=battery, capex_batt_kwh=capex_batt_kwh[i],
+                      capex_batt_kw=capex_batt_kw[i], gas=gas, year_index=i, sys=sys_band)
+            res = optimal_cost_3d(sim, R, lcoe_solar[i], lcoe_wind[i], prev_x=prev_x, **kw)
+            out[R][i] = res[0]
+            prev_x = np.array([res[5], res[6], res[7]])
+    return out
+
 
 def run_simulation(
     solar: TechParams       = SOLAR,
@@ -44,6 +63,7 @@ def run_simulation(
     design_p90: bool        = False,
     h2_system: bool         = False,
     weather_years: Optional[list] = None,
+    resource_band: Optional[list] = None,
 ) -> Dict:
     if reliabilities is None:
         reliabilities = [0.80, 0.90]
@@ -75,6 +95,33 @@ def run_simulation(
         "gas_name": gas.name, "smr_name": smr.name, "workload_name": workload.name,
         "wind_solar_corr": sys.wind_solar_corr, "scenarios": {},
         "sim_cf": {"solar": sim.sol_cf_mean, "wind": sim.win_cf_mean},
+    }
+    # Run provenance (deterministic — no wall-clock): code state + inputs, so any
+    # exported figure/table traces to exact inputs and two identical runs match.
+    _cfg = {
+        "solar": [solar.lcoe_today, solar.learning_rate, solar.wacc],
+        "wind": [wind.lcoe_today, wind.learning_rate, wind.wacc],
+        "battery": [battery.capex_kwh_today, battery.capex_kw_today, battery.wacc],
+        "gas": [gas.gas_price_mmbtu, gas.carbon_price_today,
+                gas.carbon_price_ceiling, gas.carbon_trajectory, gas.wacc],
+        "resource": [mean_irr, mean_wind_ms],
+        "weather": [sys.wind_solar_corr, sys.syn_loading, sys.syn_persistence,
+                    sys.n_sites, sys.site_synoptic_corr],
+        "grid": [sys.grid_steps, sys.n_mc_weather, sys.c_sol_max, sys.c_win_max,
+                 sys.storage_hours_max],
+        "seed": seed, "years": years, "workload": workload.name,
+    }
+    results["provenance"] = {
+        "model_version": MODEL_VERSION,
+        "git_commit": git_commit(),
+        "weather_source": "reanalysis" if weather_years is not None else "synthetic",
+        "n_weather_years": (len(weather_years) if weather_years is not None
+                            else sys.n_mc_weather),
+        "seed": seed,
+        "grid_steps": sys.grid_steps,
+        "n_sites": sys.n_sites,
+        "site_synoptic_corr": sys.site_synoptic_corr,
+        "config_sha256": config_hash(_cfg),
     }
     if grid_ppa is not None:
         results["grid_ppa"] = grid_ppa_trajectory(grid_ppa, lcoe_solar)
@@ -185,6 +232,28 @@ def run_simulation(
         results["h2_system"] = h2_system_trajectory(
             solar, wind, battery, mean_irr, mean_wind_ms, sys, years, seed=seed)
 
+    # Geographic / siting band: re-solve each trajectory (every RE target + the H₂ system)
+    # at a poor and a good site for the region, and store the min–max envelope. This is the
+    # spread from *where* you build — the dominant uncertainty for an off-grid siting
+    # decision — and it is what fig1 shades (a resource RANGE, not a capex CI; the capex
+    # P10–P90 stays in opt_delivered_low/high). Skipped under supplied reanalysis weather
+    # (the resource is then fixed) and at reduced MC since the band is illustrative.
+    if resource_band and weather_years is None:
+        sys_band = _sys_with(sys, n_mc_weather=min(sys.n_mc_weather, 25))
+        deliv = [_delivered_at_resource(mi, mw, solar, wind, battery, gas, sys_band,
+                                        workload, seed, reliabilities, years, lcoe_solar,
+                                        lcoe_wind, capex_batt_kwh, capex_batt_kw)
+                 for (mi, mw) in resource_band]
+        for R in reliabilities:
+            stack = np.stack([d[R] for d in deliv])           # (n_extremes, years+1)
+            results["scenarios"][R]["opt_delivered_reslo"] = stack.min(0)   # good site
+            results["scenarios"][R]["opt_delivered_reshi"] = stack.max(0)   # poor site
+        if h2_system:
+            h2b = np.stack([h2_system_trajectory(solar, wind, battery, mi, mw, sys, years,
+                                                 seed=seed)["lcoe"] for (mi, mw) in resource_band])
+            results["h2_system"]["lcoe_reslo"] = h2b.min(0)
+            results["h2_system"]["lcoe_reshi"] = h2b.max(0)
+
     return results
 
 
@@ -195,13 +264,14 @@ def _nearest_re(results, target: float) -> float:
 
 def run_region(region, solar, wind, battery, gas, smr, sys, workload,
                mean_irr, mean_wind_ms, reliabilities, prefix, seed=0, grid_ppa=None,
-               design_p90=False, h2_system=False):
+               design_p90=False, h2_system=False, weather_years=None, resource_band=None):
     print(f"\n{'━'*42} {region} {'━'*42}")
     results = run_simulation(
         solar=solar, wind=wind, battery=battery, gas=gas, smr=smr,
         sys=sys, workload=workload, mean_irr=mean_irr,
         mean_wind_ms=mean_wind_ms, reliabilities=reliabilities, seed=seed,
         grid_ppa=grid_ppa, design_p90=design_p90, h2_system=h2_system,
+        weather_years=weather_years, resource_band=resource_band,
     )
     print_summary(results, region=region)
     export_results(results, region=region, prefix=prefix)
@@ -227,16 +297,16 @@ def run_region(region, solar, wind, battery, gas, smr, sys, workload,
     return results
 
 
-def run_region_key(region_key, workload, reliabilities, prefix,
+def run_region_cfg(cfg, workload, reliabilities, prefix,
                    sys_overrides=None, seed=42, design_p90=False,
-                   mean_irr=None, mean_wind_ms=None, gas=None, h2_system=False):
-    """Run a region (from REGIONS) with a chosen workload; thin wrapper over run_region.
+                   mean_irr=None, mean_wind_ms=None, gas=None, h2_system=False,
+                   weather_years=None, resource_band=None):
+    """Run a region BUNDLE (a REGIONS-style dict) with a chosen workload.
 
-    `mean_irr` / `mean_wind_ms` override the region's default resource (used by the
-    resource-quality sensitivity); `design_p90` adds the robustness-design series;
-    `gas` overrides the firming resource (e.g. green-H2 via --firming h2); `h2_system`
-    adds the fully-optimised gas-free H₂ system (fig1 line + fig6)."""
-    cfg = REGIONS[region_key]
+    Shared by `run_region_key` (built-in regions) and the `--site` path (a custom
+    site loaded from JSON), so a region and a user-supplied site are described and run
+    through exactly one code path. `weather_years`, if given, drives the dispatch with
+    real reanalysis CF traces instead of the synthetic generator."""
     sys = _sys_with(cfg["sys"], **sys_overrides) if sys_overrides else cfg["sys"]
     label = f"{cfg['label']} ({workload.name})"
     return run_region(label, cfg["solar"], cfg["wind"], cfg["battery"],
@@ -245,7 +315,27 @@ def run_region_key(region_key, workload, reliabilities, prefix,
                       cfg["mean_irr"] if mean_irr is None else mean_irr,
                       cfg["mean_wind_ms"] if mean_wind_ms is None else mean_wind_ms,
                       reliabilities, prefix, seed=seed, grid_ppa=cfg.get("grid_ppa"),
-                      design_p90=design_p90, h2_system=h2_system)
+                      design_p90=design_p90, h2_system=h2_system,
+                      weather_years=weather_years, resource_band=resource_band)
+
+
+def run_region_key(region_key, workload, reliabilities, prefix,
+                   sys_overrides=None, seed=42, design_p90=False,
+                   mean_irr=None, mean_wind_ms=None, gas=None, h2_system=False,
+                   weather_years=None, resource_band=False):
+    """Run a region (from REGIONS) with a chosen workload; thin wrapper over run_region_cfg.
+
+    `mean_irr` / `mean_wind_ms` override the region's default resource (used by the
+    resource-quality sensitivity); `design_p90` adds the robustness-design series;
+    `gas` overrides the firming resource (e.g. green-H2 via --firming h2); `h2_system`
+    adds the fully-optimised gas-free H₂ system (fig1 line + fig6); `resource_band=True`
+    adds the fig1 geographic/siting band (poor↔good site for the region)."""
+    band = resource_band_for(region_key) if resource_band else None
+    return run_region_cfg(REGIONS[region_key], workload, reliabilities, prefix,
+                          sys_overrides=sys_overrides, seed=seed, design_p90=design_p90,
+                          mean_irr=mean_irr, mean_wind_ms=mean_wind_ms, gas=gas,
+                          h2_system=h2_system, weather_years=weather_years,
+                          resource_band=band)
 
 
 def run_full_suite():
@@ -262,8 +352,10 @@ def run_full_suite():
     # the maximum achievable RE is ≈0.94 (EU) / ≈0.95 (US). Pushing past ~94% requires
     # long-duration storage or H₂ firming — see the --ldes / --firming h2 overlays (fig6).
     reliabilities = [0.70, 0.80, 0.85, 0.90]
-    run_region_key("us", FIRM, reliabilities, prefix="us_firm", seed=42, h2_system=True)
-    run_region_key("eu", FIRM, reliabilities, prefix="eu_firm", seed=42, h2_system=True)
+    run_region_key("us", FIRM, reliabilities, prefix="us_firm", seed=42,
+                   h2_system=True, resource_band=True)
+    run_region_key("eu", FIRM, reliabilities, prefix="eu_firm", seed=42,
+                   h2_system=True, resource_band=True)
     print("\nDone — figures saved in figs/")
 
 

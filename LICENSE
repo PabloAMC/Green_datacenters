@@ -1,0 +1,33 @@
+Off-Grid Datacenter LCOE Model
+Copyright (c) 2026 Pablo Antonio Moreno Casares
+
+This work (the model code, documentation, and generated outputs) is licensed under the
+Creative Commons Attribution 4.0 International License (CC BY 4.0).
+
+You are free to:
+  • Share — copy and redistribute the material in any medium or format.
+  • Adapt — remix, transform, and build upon the material for any purpose, even
+    commercially.
+
+Under the following term:
+  • Attribution — You must give appropriate credit, provide a link to this license,
+    and indicate if changes were made. You may do so in any reasonable manner, but not
+    in any way that suggests the licensor endorses you or your use.
+
+No additional restrictions — You may not apply legal terms or technological measures
+that legally restrict others from doing anything the license permits.
+
+The full, authoritative legal text of CC BY 4.0 is available at:
+  https://creativecommons.org/licenses/by/4.0/legalcode
+and a human-readable summary at:
+  https://creativecommons.org/licenses/by/4.0/
+The full legal text is incorporated into this LICENSE by reference.
+
+THE WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. It is a stylised
+techno-economic model intended for directional analysis, not precise prediction
+(see the accuracy summary in model_documentation.md).
+
+Third-party data: the cost and weather *inputs* are derived from the external sources
+cited in model_documentation.md (Lazard, NREL, ECMWF/ERA5, BloombergNEF, EIA, IPCC, EU
+ETS, and others), each of which carries its own terms; this license covers the model and
+its own outputs, not those third-party source materials.

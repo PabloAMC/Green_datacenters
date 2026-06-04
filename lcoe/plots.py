@@ -61,11 +61,16 @@ def plot_cost_trajectories(results, region="US"):
     yrs = results["years"]
     Rs  = sorted(results["scenarios"].keys())
     fig, ax = plt.subplots(figsize=(7, 5))
+    # Shaded bands = the geographic/siting RANGE (poor↔good site for the region), not a
+    # probabilistic CI. Present only when the run computed it (resource_band=True); falls
+    # back to nothing otherwise. The capex P10–P90 lives in the summary table / export.
+    has_band = any("opt_delivered_reslo" in results["scenarios"][R] for R in Rs)
     for R, col in zip(Rs, PALETTE):
         sc = results["scenarios"][R]
         ax.plot(yrs, sc["opt_delivered"], color=col, lw=2, label=f"Optimal ({R:.0%} RE)")
-        ax.fill_between(yrs, sc["opt_delivered_low"], sc["opt_delivered_high"],
-                        color=col, alpha=0.12, edgecolor="none")
+        if "opt_delivered_reslo" in sc:
+            ax.fill_between(yrs, sc["opt_delivered_reslo"], sc["opt_delivered_reshi"],
+                            color=col, alpha=0.13, edgecolor="none")
         _crossings(ax, yrs, sc["opt_delivered"], results["gas_pure"], col, f"{R:.0%}")
     ax.plot(yrs, results["gas_pure"], color=C_GAS, lw=2, ls="--", label=results["gas_name"])
     ax.plot(yrs, results["lcoe_smr"], color=C_SMR, lw=2, ls="-.", label=results["smr_name"])
@@ -76,12 +81,19 @@ def plot_cost_trajectories(results, region="US"):
         ax.plot(yrs, results["grid_cfe"], color=C_CFE, lw=2, ls=(0, (1, 1)),
                 label=results["grid_cfe_name"])
     if "h2_system" in results:
-        ax.plot(yrs, results["h2_system"]["lcoe"], color=C_H2, lw=2.5,
-                label="Optimised gas-free H₂ system")
+        h2 = results["h2_system"]
+        ax.plot(yrs, h2["lcoe"], color=C_H2, lw=2.5, label="Optimised gas-free H₂ system")
+        if "lcoe_reslo" in h2:
+            ax.fill_between(yrs, h2["lcoe_reslo"], h2["lcoe_reshi"],
+                            color=C_H2, alpha=0.13, edgecolor="none")
     ax.set(xlabel="Year", ylabel="Delivered cost ($/MWh)",
            title=f"Delivered cost trajectory — {region}",
            xlim=(yrs[0], yrs[-1]), ylim=(0, None))
-    ax.legend(fontsize=9, frameon=True, facecolor="white", framealpha=1)
+    band_note = ("  ·  shaded = resource/siting range (poor↔good site)"
+                 if has_band else "")
+    ax.legend(fontsize=9, frameon=True, facecolor="white", framealpha=1,
+              title=(f"Lines = central site{band_note}" if has_band else None),
+              title_fontsize=7)
     ax.text(0.01, 0.01, REFS, transform=ax.transAxes, fontsize=6, va="bottom",
             alpha=0.5, family="monospace")
     _year_axis(ax)

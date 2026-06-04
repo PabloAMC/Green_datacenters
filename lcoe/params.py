@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 """Dataclasses, technology/region presets, and system parameters."""
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, fields, replace
+
+MODEL_VERSION = "5.6.0"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,6 +214,19 @@ class SystemParams:
     wind_v_ci: float = 3.0
     wind_v_rated: float = 11.0
     wind_v_cutout: float = 25.0
+    # ── Spatial diversification (geographic portfolio) ─────────────────────────
+    # n_sites>1 averages CF over `n_sites` separated sites that SHARE the regional
+    # synoptic factor with pairwise correlation `site_synoptic_corr`. This preserves
+    # the mean CF exactly (cost basis untouched) but softens the multi-day Dunkelflaute
+    # tails — the largest directional bias of the single-site default (§12). n_sites=1
+    # reduces exactly to the single-site generator, so it leaves the headline unchanged.
+    n_sites: int = 1               # number of geographically-separated generation sites
+    site_synoptic_corr: float = 0.7  # pairwise cross-site correlation of the Dunkelflaute factor
+    # Datacenter load shape (mean-normalised to 1.0, so "per MW of average load").
+    # "flat" = constant load (default, reduces dispatch exactly to the headline model);
+    # "cooling" adds a temperature-driven PUE overhead so peak load > average and firm
+    # gas backup (sized to peak) is modestly larger (§5.7).
+    load_profile: str = "flat"
 
 
 # ── Workload presets ──────────────────────────────────────────────────────────
@@ -407,14 +423,77 @@ FIRMING_PRESETS = {"gas": None, "h2": GAS_H2}   # None → region default gas
 # Lazard's CF bands — US solar ≈0.23 / wind ≈0.33, EU solar ≈0.16 / wind ≈0.28 — so it
 # is no longer artificially pessimistic; "good" pushes toward the top of those bands
 # (US ≈0.26 / 0.45, EU ≈0.19 / 0.41). Used by `run_resource_sensitivity` / --resource.
+# `low` is a poor-but-plausible site in the region (cloudier / lower wind — e.g. the US
+# Ohio Valley/Southeast, or a weak northern-European site); `good` a modern well-sited
+# plant. The pair (low, good) brackets the geographic/siting range used for the fig1
+# resource band (the `default` central line sits between them).
 RESOURCE_PRESETS = {
-    "us": {"default": (5.5, 7.5), "good": (6.8, 9.0)},
-    "eu": {"default": (3.8, 7.0), "good": (4.6, 8.5)},
+    "us": {"low": (4.5, 6.5), "default": (5.5, 7.5), "good": (6.8, 9.0)},
+    "eu": {"low": (3.2, 6.0), "default": (3.8, 7.0), "good": (4.6, 8.5)},
 }
+
+
+def resource_band_for(region_key: str):
+    """(poor-site, good-site) resource pairs for the fig1 siting band, or None."""
+    p = RESOURCE_PRESETS.get(region_key)
+    if not p or "low" not in p or "good" not in p:
+        return None
+    return [p["low"], p["good"]]
 
 
 def _sys_with(sys: SystemParams, **overrides) -> SystemParams:
     """Copy a SystemParams with selected fields overridden (e.g. coarser grid for sweeps)."""
     return SystemParams(**{**sys.__dict__, **overrides})
+
+
+# ── Config-driven custom sites (CLI --site) ─────────────────────────────────────
+# A site is described by a small JSON file that *inherits* a built-in region's tech,
+# battery, SMR and grid-PPA defaults (`based_on`: "us" | "eu") and overrides only the
+# things that actually vary by location: the resource (mean_irr, mean_wind_ms), the gas
+# market (any GasParams field, e.g. gas_price_mmbtu, carbon_price_today), and any
+# SystemParams field (e.g. wind_solar_corr, n_sites, site_synoptic_corr, syn_persistence,
+# the optimiser bounds). This means a new geography is a *data* file, not a code change.
+# Example (sites/example_texas.json):
+#   { "label": "Texas (ERCOT)", "based_on": "us", "mean_irr": 5.8, "mean_wind_ms": 8.5,
+#     "gas_price_mmbtu": 3.2, "n_sites": 3, "site_synoptic_corr": 0.6 }
+_SITE_META_KEYS = {"label", "based_on", "mean_irr", "mean_wind_ms"}
+
+
+def load_site_config(path: str) -> dict:
+    """Load a JSON site file → a REGIONS-style bundle consumable by `run_region_cfg`.
+
+    Unknown keys raise (so typos surface immediately rather than being silently
+    ignored). Any `GasParams` / `SystemParams` field name is a valid override key.
+    """
+    with open(path) as fh:
+        spec = json.load(fh)
+    if not isinstance(spec, dict):
+        raise ValueError(f"site config {path!r} must be a JSON object")
+
+    base_key = spec.get("based_on", "us")
+    if base_key not in REGIONS:
+        raise ValueError(f"site 'based_on' must be one of {list(REGIONS)}; got {base_key!r}")
+    cfg = dict(REGIONS[base_key])   # shallow copy of the region bundle
+
+    gas_fields = {f.name for f in fields(GasParams)}
+    sys_fields = {f.name for f in fields(SystemParams)}
+    unknown = set(spec) - _SITE_META_KEYS - gas_fields - sys_fields
+    if unknown:
+        raise ValueError(f"unknown site config keys {sorted(unknown)}; "
+                         f"valid keys are {sorted(_SITE_META_KEYS | gas_fields | sys_fields)}")
+
+    cfg["label"] = spec.get("label", cfg["label"])
+    if "mean_irr" in spec:
+        cfg["mean_irr"] = float(spec["mean_irr"])
+    if "mean_wind_ms" in spec:
+        cfg["mean_wind_ms"] = float(spec["mean_wind_ms"])
+
+    gas_ov = {k: spec[k] for k in spec if k in gas_fields}
+    if gas_ov:
+        cfg["gas"] = replace(cfg["gas"], **gas_ov)
+    sys_ov = {k: spec[k] for k in spec if k in sys_fields}
+    if sys_ov:
+        cfg["sys"] = _sys_with(cfg["sys"], **sys_ov)
+    return cfg
 
 

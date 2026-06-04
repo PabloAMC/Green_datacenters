@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "offgrid-datacenter-lcoe"
+version = "5.6.0"
+description = "Least-cost solar/wind/battery/gas mix for an off-grid datacenter at a target renewable fraction (US & Europe), and the year renewables beat gas."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "CC-BY-4.0" }
+authors = [{ name = "Pablo Antonio Moreno Casares" }]
+keywords = ["LCOE", "energy", "datacenter", "renewables", "techno-economic"]
+
+# Runtime deps mirror requirements.txt (floors). For an exactly-reproducible
+# environment use requirements-lock.txt (pinned to the verified versions).
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+plots = ["scienceplots>=2.1"]
+
+[project.scripts]
+datacenter-lcoe = "lcoe.cli:main"
+
+[tool.setuptools]
+# The package is `lcoe/`; `datacenter_lcoe.py` is a top-level backward-compat shim.
+packages = ["lcoe"]
+py-modules = ["datacenter_lcoe"]

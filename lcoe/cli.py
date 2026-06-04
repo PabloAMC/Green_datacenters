@@ -6,8 +6,10 @@ import os
 import matplotlib.pyplot as plt
 
 from .params import (REGIONS, WORKLOAD_PRESETS, WorkloadProfile,
-                     AI_TRAINING, RESOURCE_PRESETS, FIRMING_PRESETS, LDES_PRESETS)
-from .simulate import run_region_key, run_full_suite
+                     AI_TRAINING, RESOURCE_PRESETS, FIRMING_PRESETS, LDES_PRESETS,
+                     load_site_config)
+from .simulate import run_region_key, run_region_cfg, run_full_suite
+from .weather import load_weather_traces
 from .analysis import (run_flex_sensitivity, run_resource_sensitivity, run_tornado,
                        run_ldes_overlay, run_ldes_joint, run_firming_comparison)
 from .plots import (plot_flex_heatmap, plot_tornado, plot_ldes_joint,
@@ -17,7 +19,7 @@ from .plots import (plot_flex_heatmap, plot_tornado, plot_ldes_joint,
 def build_arg_parser():
     import argparse
     p = argparse.ArgumentParser(
-        description="Off-grid datacenter LCOE model (v5.5). No args → firm US+EU suite.")
+        description="Off-grid datacenter LCOE model (v5.6). No args → firm US+EU suite.")
     p.add_argument("--region", choices=list(REGIONS), help="us | eu")
     p.add_argument("--workload", choices=list(WORKLOAD_PRESETS),
                    help="flexibility preset for a single-scenario run "
@@ -56,6 +58,25 @@ def build_arg_parser():
     p.add_argument("--firming-compare", action="store_true",
                    help="compare gas-backed vs green-H2-firmed delivered cost for a "
                         "region/RE target → figure")
+    p.add_argument("--sites", type=int,
+                   help="geographic diversification: number of separated generation "
+                        "sites to portfolio-average (default 1 = single site). >1 "
+                        "softens multi-day Dunkelflaute while preserving mean CF.")
+    p.add_argument("--site-corr", type=float,
+                   help="pairwise cross-site correlation of the Dunkelflaute factor "
+                        "[0–1] (default 0.7); only used with --sites > 1")
+    p.add_argument("--weather", metavar="PATH.npz",
+                   help="drive the dispatch with real reanalysis weather instead of the "
+                        "synthetic generator: an .npz of hourly CF (see tools/ingest_weather.py)")
+    p.add_argument("--site", metavar="PATH.json",
+                   help="run a custom site described by a JSON config "
+                        "(see sites/ for the schema and examples)")
+    p.add_argument("--load-profile", choices=["flat", "cooling"],
+                   help="datacenter load shape (default flat). 'cooling' adds a "
+                        "temperature-driven PUE overhead so peak load > average.")
+    p.add_argument("--resource-band", action="store_true",
+                   help="fig1: shade each trajectory (incl. the gas-free H₂ line) over a "
+                        "poor↔good site for the region — the geographic/siting range")
     p.add_argument("--grid-steps", type=int, help="advanced: optimiser grid resolution")
     p.add_argument("--mc", type=int, help="advanced: Monte-Carlo weather years")
     return p
@@ -75,6 +96,14 @@ def _validate_args(parser, args) -> None:
         parser.error("--grid-steps must be ≥ 2 (need ≥2 nodes per axis to interpolate)")
     if args.mc is not None and args.mc < 1:
         parser.error("--mc must be ≥ 1")
+    if args.sites is not None and args.sites < 1:
+        parser.error("--sites must be ≥ 1 (number of generation sites)")
+    if args.site_corr is not None and not (0.0 <= args.site_corr <= 1.0):
+        parser.error("--site-corr must be in [0, 1]")
+    if args.weather is not None and not os.path.exists(args.weather):
+        parser.error(f"--weather file not found: {args.weather}")
+    if args.site is not None and not os.path.exists(args.site):
+        parser.error(f"--site config not found: {args.site}")
 
 
 def main(argv=None):
@@ -153,7 +182,9 @@ def main(argv=None):
     # Single custom scenario
     if args.region or args.workload or args.interruptible is not None \
             or args.shed_penalty is not None or args.re or args.design_p90 \
-            or args.resource or args.firming != "gas":
+            or args.resource or args.firming != "gas" or args.site \
+            or args.weather or args.sites is not None or args.site_corr is not None \
+            or args.load_profile or args.resource_band:
         region = args.region or "us"
         wl = WORKLOAD_PRESETS[args.workload] if args.workload else AI_TRAINING
         if args.interruptible is not None or args.shed_penalty is not None:
@@ -167,15 +198,41 @@ def main(argv=None):
             sys_ov["grid_steps"] = args.grid_steps
         if args.mc:
             sys_ov["n_mc_weather"] = args.mc
+        if args.sites is not None:
+            sys_ov["n_sites"] = args.sites
+        if args.site_corr is not None:
+            sys_ov["site_synoptic_corr"] = args.site_corr
+        if args.load_profile:
+            sys_ov["load_profile"] = args.load_profile
         mi = mw = None
         if args.resource:
             mi, mw = RESOURCE_PRESETS[region][args.resource]
         gas_override = FIRMING_PRESETS[args.firming]   # None → region default gas
-        prefix = f"cli_{region}_{args.workload or 'training'}"
-        run_region_key(region, wl, reliabilities, prefix=prefix,
-                       sys_overrides=sys_ov or None, seed=args.seed,
-                       design_p90=args.design_p90, mean_irr=mi, mean_wind_ms=mw,
-                       gas=gas_override)
+        # Real reanalysis weather (if supplied) replaces the synthetic generator.
+        weather_years = load_weather_traces(args.weather) if args.weather else None
+
+        if args.site:                                  # custom site from JSON config
+            cfg = load_site_config(args.site)
+            slug = os.path.splitext(os.path.basename(args.site))[0]
+            prefix = f"cli_site_{slug}"
+            # No region presets for a custom site → derive a generic poor↔good bracket
+            # (±~18% irradiance / ±~13% wind) around its central resource.
+            band = None
+            if args.resource_band:
+                c_mi = mi if mi is not None else cfg["mean_irr"]
+                c_mw = mw if mw is not None else cfg["mean_wind_ms"]
+                band = [(c_mi * 0.82, c_mw * 0.87), (c_mi * 1.18, c_mw * 1.13)]
+            run_region_cfg(cfg, wl, reliabilities, prefix=prefix,
+                           sys_overrides=sys_ov or None, seed=args.seed,
+                           design_p90=args.design_p90, mean_irr=mi, mean_wind_ms=mw,
+                           gas=gas_override, weather_years=weather_years, resource_band=band)
+        else:
+            prefix = f"cli_{region}_{args.workload or 'training'}"
+            run_region_key(region, wl, reliabilities, prefix=prefix,
+                           sys_overrides=sys_ov or None, seed=args.seed,
+                           design_p90=args.design_p90, mean_irr=mi, mean_wind_ms=mw,
+                           gas=gas_override, weather_years=weather_years,
+                           resource_band=args.resource_band)
         print(f"\nDone — figures saved with prefix figs/{prefix}_*.png")
         return
 

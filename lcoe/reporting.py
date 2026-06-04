@@ -2,11 +2,32 @@ from __future__ import annotations
 
 """Console summary table and machine-readable CSV/JSON export."""
 import csv
+import hashlib
 import json
 import os
+import subprocess
 from typing import Dict, Tuple
 
 import numpy as np
+
+
+# ── Provenance helpers ──────────────────────────────────────────────────────────
+
+def git_commit() -> "str | None":
+    """Short HEAD commit, or None outside a git checkout — for export provenance."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=2)
+        return out.stdout.strip() if out.returncode == 0 and out.stdout.strip() else None
+    except Exception:   # noqa: BLE001  (git absent / not a repo / timeout)
+        return None
+
+
+def config_hash(d: Dict) -> str:
+    """Deterministic 16-hex digest of the run's key inputs (no wall-clock), so two
+    runs at the same code + inputs produce byte-identical provenance."""
+    blob = json.dumps(d, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -78,6 +99,8 @@ _EXPORT_FIELDS = [
     ("gas_opex",   "gas_opex"),
     ("gas_carbon", "gas_carbon"),
     ("lcoe_p90design", "opt_delivered_p90"),   # present only when design_p90=True
+    ("lcoe_reslo", "opt_delivered_reslo"),      # geographic/siting band — good site (resource_band)
+    ("lcoe_reshi", "opt_delivered_reshi"),      # geographic/siting band — poor site
 ]
 
 
@@ -127,6 +150,7 @@ def export_results(results: Dict, region: str, prefix: str,
     payload = {
         "region": region,
         "workload": results.get("workload_name"),
+        "provenance": results.get("provenance"),
         "wind_solar_corr": float(results.get("wind_solar_corr", 0.0)),
         "simulated_cf": {k: float(v) for k, v in results["sim_cf"].items()},
         "years": yrs,
@@ -141,6 +165,15 @@ def export_results(results: Dict, region: str, prefix: str,
             for R in Rs
         },
     }
+    # Fully-optimised gas-free H₂ system trajectory (fig1 line / fig6), when present.
+    # Exporting it makes the §7.6 / fig1 numbers regenerable rather than hand-typed.
+    if "h2_system" in results:
+        h2 = results["h2_system"]
+        payload["h2_system"] = {
+            k: ([round(float(v), 4) for v in h2[k]] if hasattr(h2[k], "__len__")
+                and not isinstance(h2[k], str) else h2[k])
+            for k in h2
+        }
     with open(json_path, "w") as fh:
         json.dump(payload, fh, indent=2)
 

@@ -71,6 +71,16 @@ def main(argv):
             payload = json.load(fh)
         print("\n" + table_for(payload) + "\n")
 
+        # Fully-optimised gas-free H₂ system trajectory (fig1 line / §7.6), if exported.
+        h2 = payload.get("h2_system")
+        if h2 and "lcoe" in h2:
+            years = payload["years"]
+            idx = {y: years.index(y) for y in MILESTONES if y in years}
+            cells = "  ".join(f"{y}:${h2['lcoe'][idx[y]]:.0f}" for y in idx)
+            buy = "  ".join(f"{y}:{h2['buy_frac'][idx[y]]*100:.1f}%" for y in idx)
+            print(f"  Gas-free H₂ system ({h2.get('ldes_name','')}) delivered LCOE: {cells}")
+            print(f"    purchased-H₂ share: {buy}\n")
+
 
 if __name__ == "__main__":
     main(sys.argv[1:])

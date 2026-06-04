@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Synthetic 8760-h solar & wind generation with Dunkelflaute structure."""
 import math
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 from scipy.special import ndtr, betaincinv
@@ -46,6 +46,45 @@ def load_weather_traces(path: str) -> "List[Tuple[np.ndarray, np.ndarray]]":
 # clear-sky normaliser and the cloud draw in generate_weather_year stay consistent.
 CLOUD_BETA_A, CLOUD_BETA_B = 3.0, 1.5
 CLOUD_MEAN = CLOUD_BETA_A / (CLOUD_BETA_A + CLOUD_BETA_B)   # 0.667
+
+
+def load_profile(name: str = "flat") -> np.ndarray:
+    """An 8760-h datacenter load shape, **normalised to mean 1.0** (so it is a shape, not
+    a level — the model stays "per MW of *average* load" and every annual `/8760`
+    denominator is unchanged). `"flat"` (default) returns ones, reducing the dispatch
+    exactly to the constant-load model and leaving all published numbers untouched.
+
+    `"cooling"` adds a temperature-driven cooling (PUE) overhead on top of a constant IT
+    base: the facility draws more on hot summer afternoons, so peak load exceeds average
+    and the firm gas backup — sized to *peak* load — must be a little larger. The IT
+    compute itself is constant; only the cooling fraction breathes with the weather proxy.
+    """
+    if name == "flat":
+        return np.ones(8760)
+    if name == "cooling":
+        h = np.arange(8760)
+        doy, hod = h // 24, h % 24
+        seasonal = 0.5 * (1.0 + np.cos(2 * np.pi * (doy - 200) / 365))   # summer peak, [0,1]
+        diurnal = np.clip(np.sin((hod - 7) * np.pi / 14), 0.0, 1.0)      # afternoon peak
+        raw = 1.0 + 0.25 * seasonal * diurnal      # up to +25% cooling on a hot afternoon
+        return raw / raw.mean()                    # renormalise to mean 1 (a pure shape)
+    raise ValueError(f"unknown load_profile {name!r}; expected 'flat' or 'cooling'")
+
+
+def _ar1_series(phi: float, n: int, rng: np.random.Generator) -> np.ndarray:
+    """A length-`n` stationary AR(1) trace ~ N(0,1) with persistence `phi`.
+
+    Factored out of `generate_weather_year` so the synoptic factor can be generated
+    once and *shared* across sites (for the spatial-diversification portfolio). The
+    draw sequence is identical to the previous inline loop, so single-site results are
+    byte-for-byte unchanged.
+    """
+    x = np.empty(n)
+    x[0] = rng.standard_normal()
+    sig = math.sqrt(1.0 - phi ** 2)
+    for d in range(1, n):
+        x[d] = phi * x[d - 1] + sig * rng.standard_normal()
+    return x
 
 
 def solar_clearsky(mean_irr_kwh_m2_day: float) -> np.ndarray:
@@ -95,6 +134,7 @@ def generate_weather_year(
     wind_v_ci: float = 3.0,
     wind_v_rated: float = 11.0,
     wind_v_cutout: float = 25.0,
+    synoptic_f: "Optional[np.ndarray]" = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Synthetic 8760h solar + wind capacity factors with (v5) a persistent
@@ -119,17 +159,18 @@ def generate_weather_year(
     Because z1_d, z2_d remain *standard normal*, the Beta and Weibull marginals
     — and therefore the annual-mean capacity factors — are preserved exactly;
     only the temporal clustering of lows changes (what storage/backup must cover).
+
+    `synoptic_f`, if given, is a precomputed daily synoptic factor (365,) used INSTEAD
+    of generating one internally — the seam the spatial-diversification portfolio uses
+    to *share* a regional Dunkelflaute factor across sites (see `generate_weather_portfolio`).
     """
     rho = float(np.clip(wind_solar_corr, -0.999, 0.999))
     lam = float(np.clip(syn_loading, 0.0, math.sqrt(max((rho + 1.0) / 2.0, 0.0)) - 1e-6))
     phi = float(np.clip(syn_persistence, 0.0, 0.999))
 
     # Persistent synoptic common factor f_d ~ N(0,1), AR(1) (φ) — daily scale.
-    f = np.empty(365)
-    f[0] = rng.standard_normal()
-    sig_f = math.sqrt(1 - phi ** 2)
-    for d in range(1, 365):
-        f[d] = phi * f[d - 1] + sig_f * rng.standard_normal()
+    # Shared across sites when supplied (spatial diversification); else generated here.
+    f = _ar1_series(phi, 365, rng) if synoptic_f is None else np.asarray(synoptic_f, float)
 
     # Residual contemporaneous pair (g1,g2): corr ρ_g so net corr(z1,z2)=ρ.
     one_m = 1.0 - lam ** 2
@@ -202,5 +243,61 @@ def generate_weather_year(
                     ((speeds - v_ci) / (v_r - v_ci)) ** 3)))
 
     return solar, wind
+
+
+def generate_weather_portfolio(
+    clearsky: np.ndarray,
+    mean_wind_ms: float,
+    rng: np.random.Generator,
+    n_sites: int = 1,
+    site_synoptic_corr: float = 0.7,
+    syn_persistence: float = 0.82,
+    **kwargs,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Solar + wind CF for a PORTFOLIO of `n_sites` geographically-separated sites,
+    returned as the portfolio-average hourly CF (one solar, one wind trace).
+
+    Why this is the right shape. A real high-RE operator does not build on one patch
+    of ground; it spreads generation across sites. Dunkelflaute is synoptic-scale
+    (continental weather systems), so sites in a region experience it *together* — but
+    not perfectly: local cloud and wind texture, and the edges of a weather system,
+    decorrelate. Averaging partially-correlated sites therefore **preserves the mean CF
+    exactly** (so the imported-LCOE cost basis is untouched) while **softening the
+    multi-day tails** — which is precisely the quantity that sets high-RE storage/backup.
+    The single largest *directional* bias in the headline single-site results (§12) is
+    that it has no such smoothing; this knob restores it.
+
+    Model. All sites share one regional synoptic factor `f_common` (AR(1), persistence
+    φ); each site's factor is `f_i = √c·f_common + √(1−c)·f_i^indep`, so any two sites
+    have synoptic correlation `c = site_synoptic_corr` while each `f_i` keeps the same
+    AR(1)(φ) law (hence each site's marginals/CF are individually unchanged). Local cloud
+    and wind residuals are drawn independently per site. `n_sites=1` reduces **exactly**
+    to `generate_weather_year` (identical draw order), so it leaves the default model and
+    all published numbers untouched.
+
+    `c→1` ⇒ fully coincident sites ⇒ no smoothing; `c→0` ⇒ independent sites ⇒ maximal
+    smoothing (optimistic — real intra-region sites are strongly coupled, so the default
+    c=0.7 is deliberately conservative about how much diversification actually helps).
+    """
+    n = max(int(n_sites), 1)
+    if n == 1:
+        return generate_weather_year(clearsky, mean_wind_ms, rng,
+                                     syn_persistence=syn_persistence, **kwargs)
+
+    phi = float(np.clip(syn_persistence, 0.0, 0.999))
+    c = float(np.clip(site_synoptic_corr, 0.0, 1.0))
+    a, b = math.sqrt(c), math.sqrt(1.0 - c)
+    f_common = _ar1_series(phi, 365, rng)
+
+    sol_acc = np.zeros(8760)
+    win_acc = np.zeros(8760)
+    for _ in range(n):
+        f_site = a * f_common + b * _ar1_series(phi, 365, rng)
+        s, w = generate_weather_year(clearsky, mean_wind_ms, rng,
+                                     syn_persistence=phi, synoptic_f=f_site, **kwargs)
+        sol_acc += s
+        win_acc += w
+    return sol_acc / n, win_acc / n
 
 

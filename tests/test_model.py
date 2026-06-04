@@ -497,6 +497,205 @@ def test_good_resource_lifts_cf_and_lowers_cost():
         rd["scenarios"][0.80]["opt_delivered"][0] + 0.5
 
 
+# ── Tier-1 additions: spatial diversification, config sites, weather ingest ─────
+
+def test_spatial_diversification_identity_mean_and_tails():
+    """Portfolio weather: n_sites=1 is byte-identical to the single-site generator;
+    more sites preserve the mean CF (cost basis untouched) but soften multi-day lulls."""
+    import numpy as np
+    cs = m.solar_clearsky(5.5)
+    kw = dict(wind_solar_corr=0.0, syn_loading=0.5, syn_persistence=0.82)
+    s1, w1 = m.generate_weather_year(cs, 7.5, np.random.default_rng(0), **kw)
+    s2, w2 = m.generate_weather_portfolio(cs, 7.5, np.random.default_rng(0), n_sites=1, **kw)
+    assert np.array_equal(s1, s2) and np.array_equal(w1, w2)   # exact reduction
+
+    def worst3(sol, win):                                       # deepest 3-day lull
+        daily = (6.0 * sol + 5.0 * win).reshape(365, 24).mean(1)
+        return np.convolve(daily, np.ones(3) / 3, "valid").min()
+
+    cf1s, cf1w, cf6s, cf6w, lull1, lull6 = [], [], [], [], [], []
+    for seed in range(8):
+        s, w = m.generate_weather_portfolio(cs, 7.5, np.random.default_rng(seed),
+                                            n_sites=1, site_synoptic_corr=0.7, **kw)
+        cf1s.append(s.mean()); cf1w.append(w.mean()); lull1.append(worst3(s, w))
+        s, w = m.generate_weather_portfolio(cs, 7.5, np.random.default_rng(seed),
+                                            n_sites=6, site_synoptic_corr=0.7, **kw)
+        cf6s.append(s.mean()); cf6w.append(w.mean()); lull6.append(worst3(s, w))
+    assert abs(np.mean(cf1s) - np.mean(cf6s)) < 0.01           # mean solar CF preserved
+    assert abs(np.mean(cf1w) - np.mean(cf6w)) < 0.01           # mean wind CF preserved
+    assert np.mean(lull6) > np.mean(lull1)                     # tails softened
+
+
+def test_spatial_diversification_default_is_single_site():
+    """The shipped default must be n_sites=1 so headline results are unchanged."""
+    assert m.SYSTEM.n_sites == 1 and m.SYSTEM_EU.n_sites == 1
+
+
+def test_site_config_inherits_and_overrides():
+    import json, os, tempfile
+    spec = {"label": "T", "based_on": "us", "mean_irr": 5.8, "mean_wind_ms": 8.5,
+            "gas_price_mmbtu": 3.2, "n_sites": 3, "site_synoptic_corr": 0.6}
+    f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+    json.dump(spec, f); f.close()
+    cfg = m.load_site_config(f.name); os.unlink(f.name)
+    assert cfg["mean_irr"] == 5.8 and cfg["mean_wind_ms"] == 8.5
+    assert cfg["gas"].gas_price_mmbtu == 3.2                   # GasParams override applied
+    assert cfg["sys"].n_sites == 3 and cfg["sys"].site_synoptic_corr == 0.6
+    assert cfg["solar"] is m.REGIONS["us"]["solar"]            # inherits un-overridden tech
+    # the region's own gas is not mutated by the override
+    assert m.REGIONS["us"]["gas"].gas_price_mmbtu == 4.0
+
+
+def test_site_config_rejects_unknown_keys_and_bad_base():
+    import json, os, tempfile
+
+    def write(spec):
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump(spec, f); f.close()
+        return f.name
+
+    for bad in ({"based_on": "us", "nonsense": 1}, {"based_on": "mars"}):
+        p = write(bad)
+        try:
+            m.load_site_config(p)
+            raise AssertionError(f"expected ValueError for {bad}")
+        except ValueError:
+            pass
+        finally:
+            os.unlink(p)
+
+
+def test_example_site_file_loads():
+    import os
+    path = os.path.join(os.path.dirname(__file__), "..", "sites", "example_texas.json")
+    cfg = m.load_site_config(path)
+    assert cfg["sys"].n_sites >= 1 and cfg["mean_irr"] > 0
+
+
+def test_weather_npz_roundtrip_and_shape_guard():
+    import numpy as np, os, tempfile
+    solar = np.random.default_rng(0).uniform(0, 1, (2, 8760))
+    wind = np.random.default_rng(1).uniform(0, 1, (2, 8760))
+    f = tempfile.NamedTemporaryFile(suffix=".npz", delete=False); f.close()
+    np.savez(f.name, solar=solar, wind=wind)
+    years = m.load_weather_traces(f.name); os.unlink(f.name)
+    assert len(years) == 2 and years[0][0].shape == (8760,)
+    assert np.allclose(years[1][1], wind[1])                   # round-trips exactly
+    bad = tempfile.NamedTemporaryFile(suffix=".npz", delete=False); bad.close()
+    np.savez(bad.name, solar=np.zeros((2, 100)), wind=np.zeros((2, 100)))
+    try:
+        m.load_weather_traces(bad.name)
+        raise AssertionError("expected ValueError on wrong shape")
+    except ValueError:
+        pass
+    finally:
+        os.unlink(bad.name)
+
+
+# ── Tier-3 additions: load profile, external validation, synoptic calibration ───
+
+def test_load_profile_shapes_and_default():
+    import numpy as np
+    flat = m.load_profile("flat")
+    assert flat.shape == (8760,) and np.all(flat == 1.0)
+    cool = m.load_profile("cooling")
+    assert abs(cool.mean() - 1.0) < 1e-9                  # mean-1: a pure shape
+    assert cool.max() > 1.10                              # peak load exceeds average
+    assert m.SYSTEM.load_profile == "flat"                # default = constant-load headline
+
+
+def test_cooling_load_raises_firm_gas_peak():
+    """A peaky (cooling) load needs a bigger firm gas plant, since gas is sized to peak."""
+    base = _tiny_sim()                                    # flat, seed 0
+    cool = _tiny_sim(sysp=m._sys_with(m.SYSTEM, grid_steps=4, n_mc_weather=4,
+                                      load_profile="cooling"))
+    b = (6.0, 5.0, 6.0)
+    assert cool.interp3(cool.gas_peak_firm_mean, *b) > base.interp3(base.gas_peak_firm_mean, *b)
+
+
+def test_external_validation_published_bands():
+    """Sanity-anchor the headline cost inputs against published external ranges
+    (Lazard v18 unsubsidised; EIA gas) — a guard that the model stays in the real world."""
+    sol = m.rewacc_lcoe(m.wright_law(m.SOLAR.lcoe_today, m.SOLAR.cumulative_gw_2025,
+            m.cumulative_capacity(m.SOLAR, 15), m.SOLAR.learning_rate), m.SOLAR)[0]
+    win = m.rewacc_lcoe(m.wright_law(m.WIND.lcoe_today, m.WIND.cumulative_gw_2025,
+            m.cumulative_capacity(m.WIND, 15), m.WIND.learning_rate), m.WIND)[0]
+    assert 29.0 <= sol <= 96.0, f"US solar 2025 ${sol:.1f} outside Lazard v18 band"
+    assert 27.0 <= win <= 75.0, f"US wind 2025 ${win:.1f} outside Lazard v18 band"
+    gas = m.gas_pure_lcoe(m.GAS, 0, m.GAS.wacc)
+    assert 40.0 <= gas <= 110.0, f"US gas ${gas:.1f} outside EIA/Lazard CCGT band"
+    r = _quick_sim(5.5, 7.5, years=0, seed=42)
+    assert 0.20 <= r["sim_cf"]["solar"] <= 0.30, r["sim_cf"]["solar"]   # Lazard solar CF
+    assert 0.30 <= r["sim_cf"]["wind"] <= 0.55, r["sim_cf"]["wind"]     # Lazard wind CF
+
+
+def test_synoptic_calibration_recovers_direction():
+    """The calibrator is a moment estimator: monotone but attenuated. Assert the robust
+    properties — it ranks persistence and recovers the sign of the wind-solar correlation."""
+    import numpy as np
+    from lcoe.weather import solar_clearsky, generate_weather_year
+    from tools.calibrate_synoptic import estimate
+    cs = solar_clearsky(3.8)
+
+    def paired(phi, rho, Y=18, seed=1):
+        rng = np.random.default_rng(seed)
+        S, W = [], []
+        for _ in range(Y):
+            s, w = generate_weather_year(cs, 7.0, rng, wind_solar_corr=rho,
+                                         syn_loading=0.5, syn_persistence=phi)
+            S.append(s); W.append(w)
+        return estimate(np.array(S), np.array(W))
+
+    lo, hi = paired(0.70, 0.0), paired(0.92, 0.0)
+    assert hi["syn_persistence"] > lo["syn_persistence"]           # ranks persistence
+    assert 0.0 < hi["syn_persistence"] < 1.0
+    assert paired(0.85, -0.35)["wind_solar_corr"] < 0.0            # recovers sign of ρ
+
+
+def test_synoptic_calibration_site_corr_monotone():
+    """Multi-site: a more correlated portfolio yields a higher estimated site corr."""
+    import math
+    import numpy as np
+    from lcoe.weather import solar_clearsky, generate_weather_year, _ar1_series
+    from tools.calibrate_synoptic import estimate
+    cs = solar_clearsky(3.8)
+
+    def multisite(c, S=3, Y=10, seed=3):
+        rng = np.random.default_rng(seed)
+        sol = np.zeros((S, Y, 8760)); win = np.zeros((S, Y, 8760))
+        a, b = math.sqrt(c), math.sqrt(1 - c)
+        for y in range(Y):
+            fc = _ar1_series(0.85, 365, rng)
+            for s in range(S):
+                fsite = a * fc + b * _ar1_series(0.85, 365, rng)
+                so, wi = generate_weather_year(cs, 7.0, rng, wind_solar_corr=-0.35,
+                                               syn_loading=0.5, syn_persistence=0.85,
+                                               synoptic_f=fsite)
+                sol[s, y] = so; win[s, y] = wi
+        return estimate(sol, win)["site_synoptic_corr"]
+
+    assert multisite(0.85) > multisite(0.30)                       # monotone in true c
+
+
+def test_resource_band_brackets_central():
+    """The fig1 geographic/siting band re-optimises at a poor and a good site; the
+    default-resource central line must sit inside it, good cheaper than poor."""
+    from lcoe.params import resource_band_for
+    # grid_steps≥12 so the optimiser resolves the resource ordering (coarser grids are too
+    # noisy for the ~$5/MWh good-vs-default gap; the headline runs at 21).
+    r = m.run_simulation(
+        solar=m.SOLAR, wind=m.WIND, battery=m.BATTERY_US, gas=m.GAS, smr=m.SMR,
+        sys=m._sys_with(m.SYSTEM, grid_steps=12, n_mc_weather=12), workload=m.FIRM,
+        mean_irr=5.5, mean_wind_ms=7.5, years=0, reliabilities=[0.80], seed=1,
+        resource_band=resource_band_for("us"))
+    sc = r["scenarios"][0.80]
+    assert "opt_delivered_reslo" in sc                       # band computed
+    lo, c, hi = (sc["opt_delivered_reslo"][0], sc["opt_delivered"][0],
+                 sc["opt_delivered_reshi"][0])
+    assert lo < hi                                           # good site < poor site
+    assert lo - 1.0 <= c <= hi + 1.0                         # central inside (grid-noise tol)
+
+
 # ── runner ────────────────────────────────────────────────────────────────────
 
 def _run_all():
