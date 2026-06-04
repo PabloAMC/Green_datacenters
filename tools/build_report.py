@@ -14,11 +14,15 @@ Deterministic — no wall-clock — so rebuilding at the same commit/inputs is b
 import base64
 import json
 import os
+import sys
+
+# Run from the repo root without installing the package (CI installs deps, not the
+# package), so `import lcoe` resolves whether invoked as a script or a module.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 
 from lcoe.params import (SOLAR, WIND, SOLAR_EU, WIND_EU, BATTERY_US, BATTERY_EU,
-                         GAS, GAS_EU, REGIONS, RESOURCE_PRESETS, MODEL_VERSION)
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                         GAS, GAS_EU, REGIONS, RESOURCE_PRESETS, MODEL_VERSION)  # noqa: E402
 MILESTONES = [2025, 2030, 2035, 2040]
 
 
