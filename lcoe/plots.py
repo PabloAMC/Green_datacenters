@@ -65,24 +65,30 @@ def plot_cost_trajectories(results, region="US"):
     # probabilistic CI. Present only when the run computed it (resource_band=True); falls
     # back to nothing otherwise. The capex P10–P90 lives in the summary table / export.
     has_band = any("opt_delivered_reslo" in results["scenarios"][R] for R in Rs)
+    # Legend labels are spelled out (no RE / SMR / PPA / CFE / H₂ acronyms) for readers
+    # unfamiliar with the jargon; the gas-baseline label keeps its descriptive name (it
+    # reflects the firming choice — natural gas or green hydrogen).
     for R, col in zip(Rs, PALETTE):
         sc = results["scenarios"][R]
-        ax.plot(yrs, sc["opt_delivered"], color=col, lw=2, label=f"Optimal ({R:.0%} RE)")
+        ax.plot(yrs, sc["opt_delivered"], color=col, lw=2,
+                label=f"Optimal ({R:.0%} renewable)")
         if "opt_delivered_reslo" in sc:
             ax.fill_between(yrs, sc["opt_delivered_reslo"], sc["opt_delivered_reshi"],
                             color=col, alpha=0.13, edgecolor="none")
         _crossings(ax, yrs, sc["opt_delivered"], results["gas_pure"], col, f"{R:.0%}")
     ax.plot(yrs, results["gas_pure"], color=C_GAS, lw=2, ls="--", label=results["gas_name"])
-    ax.plot(yrs, results["lcoe_smr"], color=C_SMR, lw=2, ls="-.", label=results["smr_name"])
+    ax.plot(yrs, results["lcoe_smr"], color=C_SMR, lw=2, ls="-.",
+            label="Small modular reactor (nuclear)")
     if "grid_ppa" in results:
         ax.plot(yrs, results["grid_ppa"], color=C_PPA, lw=2, ls=":",
-                label=results["grid_ppa_name"])
+                label="Grid + renewable contract")
     if "grid_cfe" in results:
         ax.plot(yrs, results["grid_cfe"], color=C_CFE, lw=2, ls=(0, (1, 1)),
-                label=results["grid_cfe_name"])
+                label="Grid + round-the-clock carbon-free")
     if "h2_system" in results:
         h2 = results["h2_system"]
-        ax.plot(yrs, h2["lcoe"], color=C_H2, lw=2.5, label="Optimised gas-free H₂ system")
+        ax.plot(yrs, h2["lcoe"], color=C_H2, lw=2.5,
+                label="Optimised gas-free hydrogen system")
         if "lcoe_reslo" in h2:
             ax.fill_between(yrs, h2["lcoe_reslo"], h2["lcoe_reshi"],
                             color=C_H2, alpha=0.13, edgecolor="none")
@@ -91,7 +97,9 @@ def plot_cost_trajectories(results, region="US"):
            xlim=(yrs[0], yrs[-1]), ylim=(0, None))
     band_note = ("  ·  shaded = resource/siting range (poor↔good site)"
                  if has_band else "")
-    ax.legend(fontsize=9, frameon=True, facecolor="white", framealpha=1,
+    # Two columns, inside the axes.
+    ax.legend(fontsize=8, frameon=True, facecolor="white", framealpha=1, ncol=2,
+              columnspacing=1.2, handlelength=1.6,
               title=(f"Lines = central site{band_note}" if has_band else None),
               title_fontsize=7)
     ax.text(0.01, 0.01, REFS, transform=ax.transAxes, fontsize=6, va="bottom",
@@ -111,16 +119,19 @@ def plot_reliability_sensitivity(results, target_year=2030, region="US"):
     ax.plot(r_pct, vals, "o-", color=C_OPT, lw=2, label="Optimal blend")
     ax.fill_between(r_pct, los, his, color=C_OPT, alpha=0.15, edgecolor="none")
     g = results["gas_pure"][idx]; s = results["lcoe_smr"][idx]
-    ax.axhline(g, color=C_GAS, ls="--", lw=2, label=f"Gas CCGT (${g:.0f}/MWh)")
-    ax.axhline(s, color=C_SMR, ls="-.", lw=2, label=f"SMR (${s:.0f}/MWh)")
+    ax.axhline(g, color=C_GAS, ls="--", lw=2, label=f"Natural gas (${g:.0f}/MWh)")
+    ax.axhline(s, color=C_SMR, ls="-.", lw=2,
+               label=f"Small modular reactor (${s:.0f}/MWh)")
     if "grid_ppa" in results:
         gp = results["grid_ppa"][idx]
-        ax.axhline(gp, color=C_PPA, ls=":", lw=2, label=f"Grid+RE PPA (${gp:.0f}/MWh)")
+        ax.axhline(gp, color=C_PPA, ls=":", lw=2,
+                   label=f"Grid + renewable contract (${gp:.0f}/MWh)")
     if "grid_cfe" in results:
         gc = results["grid_cfe"][idx]
-        ax.axhline(gc, color=C_CFE, ls=(0, (1, 1)), lw=2, label=f"Grid 24/7 CFE (${gc:.0f}/MWh)")
+        ax.axhline(gc, color=C_CFE, ls=(0, (1, 1)), lw=2,
+                   label=f"Grid + round-the-clock carbon-free (${gc:.0f}/MWh)")
     ax.set(xlabel="Renewable fraction (%)", ylabel="Delivered cost ($/MWh)",
-           title=f"Cost vs. RE fraction at {target_year} — {region}",
+           title=f"Cost vs. renewable fraction at {target_year} — {region}",
            ylim=(0, None))
     ax.legend(fontsize=9, frameon=True, facecolor="white", loc="lower right")
     ax.text(0.01, 0.01, REFS, transform=ax.transAxes, fontsize=6, va="bottom",
@@ -132,14 +143,14 @@ def plot_optimal_mix(results, region="US"):
     Rs = sorted(results["scenarios"].keys()); yrs = results["years"]
     fig, axes = plt.subplots(1, 3, figsize=(13, 4))
     for R, col in zip(Rs, PALETTE):
-        sc = results["scenarios"][R]; lbl = f"{R:.0%} RE"
+        sc = results["scenarios"][R]; lbl = f"{R:.0%} renewable"
         axes[0].plot(yrs, sc["opt_csol"], color=col, lw=2, label=lbl)
         axes[1].plot(yrs, sc["opt_cwin"], color=col, lw=2)
         axes[2].plot(yrs, sc["opt_B"],    color=col, lw=2)
     axes[0].set(xlabel="Year", ylabel="Solar overbuild (×load)", ylim=(0,None), title="Solar")
     axes[1].set(xlabel="Year", ylabel="Wind overbuild (×load)", ylim=(0,None), title="Wind")
     axes[2].set(xlabel="Year", ylabel="Storage duration (h)", ylim=(0,None), title="Battery")
-    axes[0].legend(fontsize=9, title="RE target")
+    axes[0].legend(fontsize=9, title="Renewable target")
     for a in axes:
         _year_axis(a)
     fig.suptitle(f"Optimal capacity mix — {region}", fontsize=12)
@@ -156,14 +167,14 @@ def plot_component_breakdown(results, reliability=0.90, region="US"):
     firm = results.get("gas_name", "Firming")        # "Gas Backup (US)" | "Green H2 firming…"
     # (values, label, colour, hatch)  — capex solid, opex hatched, per factor
     bands = [
-        (sc["gen_capex"],          "Generation — capex", B_GEN,  None),
-        (sc["gen_om"],             "Generation — O&M",   B_GEN,  "////"),
-        (sc["batt_capex"],         "Battery — capex",    B_BATT, None),
-        (sc["batt_om"],            "Battery — O&M",      B_BATT, "////"),
-        (sc["gas_capex"],          "Firming — capex",        B_FIRM,   None),
-        (sc["gas_opex"],           "Firming — fuel + O&M",   B_FIRM,   "////"),
-        (sc["gas_carbon"],         "Firming — carbon",       B_CARBON, "xx"),
-        (sc.get("opt_cp", z),      "Lost compute (shed)", B_SHED, ".."),
+        (sc["gen_capex"],          "Generation — capital",     B_GEN,  None),
+        (sc["gen_om"],             "Generation — maintenance", B_GEN,  "////"),
+        (sc["batt_capex"],         "Battery — capital",        B_BATT, None),
+        (sc["batt_om"],            "Battery — maintenance",    B_BATT, "////"),
+        (sc["gas_capex"],          "Firming — capital",        B_FIRM,   None),
+        (sc["gas_opex"],           "Firming — fuel & maintenance", B_FIRM, "////"),
+        (sc["gas_carbon"],         "Firming — carbon",         B_CARBON, "xx"),
+        (sc.get("opt_cp", z),      "Lost compute (shed)",      B_SHED, ".."),
     ]
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
     bottom = np.zeros_like(yrs, dtype=float)
@@ -174,13 +185,14 @@ def plot_component_breakdown(results, reliability=0.90, region="US"):
                         alpha=0.85, hatch=hatch, edgecolor="white", linewidth=0.3)
         bottom = bottom + vals
     ax.plot(yrs, results["gas_pure"], color=C_GAS, lw=2, ls="--",
-            label=f"{firm} (pure)")
+            label=f"{firm} (reference)")
     ax.set(xlabel="Year", ylabel="Delivered cost ($/MWh)",
-           title=f"Cost breakdown (capex/opex by factor) at {reliability:.0%} RE — {region}",
+           title=f"Cost breakdown (capital vs operating, by factor) at "
+                 f"{reliability:.0%} renewable — {region}",
            xlim=(yrs[0], yrs[-1]), ylim=(0, None))
     ax.legend(fontsize=8, frameon=True, facecolor="white",
               loc="upper left", bbox_to_anchor=(1.01, 1.0),
-              title="solid = capex · hatched = O&M / fuel")
+              title="solid = capital · hatched = fuel & maintenance")
     ax.text(0.01, 0.01, REFS, transform=ax.transAxes, fontsize=6, va="bottom",
             alpha=0.5, family="monospace")
     _year_axis(ax)
@@ -193,14 +205,14 @@ def plot_h2_breakdown(results, region="US"):
     green H₂). Analogue of fig4 but with H₂ components instead of gas; all zero-carbon."""
     h = results["h2_system"]; yrs = results["years"]
     bands = [
-        (h["gen_capex"],     "Generation — capex",   B_GEN,  None),
-        (h["gen_om"],        "Generation — O&M",     B_GEN,  "////"),
-        (h["lfp_capex"],     "LFP battery — capex",  B_BATT, None),
-        (h["lfp_om"],        "LFP battery — O&M",    B_BATT, "////"),
-        (h["elec_capex"],    "Electrolyser",         B_ELEC, None),
-        (h["store_capex"],   "H₂ storage (tanks)",   B_STORE, None),
-        (h["turbine_capex"], "H₂ turbine",           B_TURB, None),
-        (h["buy_h2"],        "Purchased green H₂",   B_BUY,   ".."),
+        (h["gen_capex"],     "Generation — capital",     B_GEN,  None),
+        (h["gen_om"],        "Generation — maintenance", B_GEN,  "////"),
+        (h["lfp_capex"],     "Battery — capital",        B_BATT, None),
+        (h["lfp_om"],        "Battery — maintenance",    B_BATT, "////"),
+        (h["elec_capex"],    "Electrolyser",             B_ELEC, None),
+        (h["store_capex"],   "Hydrogen storage (tanks)", B_STORE, None),
+        (h["turbine_capex"], "Hydrogen turbine",         B_TURB, None),
+        (h["buy_h2"],        "Purchased green hydrogen", B_BUY,   ".."),
     ]
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
     bottom = np.zeros_like(yrs, dtype=float)
@@ -213,12 +225,12 @@ def plot_h2_breakdown(results, region="US"):
     ax.plot(yrs, h["lcoe"], color="black", lw=1.5, ls="--", label="Total (optimised)")
     if "gas_pure" in results:
         ax.plot(yrs, results["gas_pure"], color=C_GAS, lw=2, ls="--",
-                label=f"{results.get('gas_name', 'Gas CCGT')} (pure, ref)")
+                label=f"{results.get('gas_name', 'Natural gas')} (reference)")
     ax.set(xlabel="Year", ylabel="Delivered cost ($/MWh)",
-           title=f"Optimised gas-free green-H₂ system — {region}",
+           title=f"Optimised gas-free green-hydrogen system — {region}",
            xlim=(yrs[0], yrs[-1]), ylim=(0, None))
     ax.legend(fontsize=8, frameon=True, facecolor="white", loc="upper left",
-              bbox_to_anchor=(1.01, 1.0), title="solid = capex · hatched = O&M / fuel")
+              bbox_to_anchor=(1.01, 1.0), title="solid = capital · hatched = fuel & maintenance")
     ax.text(0.01, 0.01, REFS + " · Lazard LCOH v4.0", transform=ax.transAxes,
             fontsize=6, va="bottom", alpha=0.5, family="monospace")
     _year_axis(ax)
