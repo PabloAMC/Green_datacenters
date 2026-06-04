@@ -1,5 +1,9 @@
 # Off-Grid Datacenter LCOE Model
 
+[![CI](https://github.com/PabloAMC/Green_datacenteres/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloAMC/Green_datacenteres/actions/workflows/ci.yml)
+[![Live results](https://img.shields.io/badge/live%20results-page-3A86FF)](https://pabloamc.github.io/Green_datacenteres/)
+[![License: CC BY 4.0](https://img.shields.io/badge/license-CC%20BY%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
+
 An optimization model that finds the least-cost combination of solar PV, onshore wind, LFP battery storage, and natural gas backup to power an off-grid datacenter at a target renewable energy fraction, across the **US** and **Europe**.
 
 📊 **[Live results page →](https://pabloamc.github.io/Green_datacenteres/)** — the headline conclusions, figures, and assumptions at a glance (generated from `output/`, so it never drifts from the numbers).
