@@ -75,14 +75,14 @@ def parity_table(d):
     if d.get("grid_ppa"):
         p = d["grid_ppa"]
         ppa = "".join(f"<td>{p[idx[y]]:.0f}</td>" for y in MILESTONES)
-        rows.append(f"<tr class='ref'><th>Grid + RE PPA (on-grid ref.)</th>{ppa}<td>—</td></tr>")
+        rows.append(f"<tr class='ref'><th>Grid + renewable contract (on-grid reference)</th>{ppa}<td>—</td></tr>")
     if d.get("h2_system"):
         h = d["h2_system"]["lcoe"]
         h2 = "".join(f"<td>{h[idx[y]]:.0f}</td>" for y in MILESTONES)
         hcx = _parity_year(years, d["h2_system"]["lcoe"], d["gas_pure"])
         rows.append(f"<tr class='h2'><th>Gas-free H₂ system</th>{h2}"
                     f"<td class='cx'>{'~%.0f' % hcx if hcx else '—'}</td></tr>")
-    return (f"<table><thead><tr><th>RE target</th>{head}<th>vs-gas crossover</th></tr></thead>"
+    return (f"<table><thead><tr><th>Renewable target</th>{head}<th>vs-gas crossover</th></tr></thead>"
             f"<tbody>{''.join(rows)}</tbody></table>")
 
 
@@ -92,26 +92,26 @@ def findings(us, eu):
     eu70, eu90 = py(eu, "0.70"), py(eu, "0.90")
     us70, us90 = py(us, "0.70"), py(us, "0.90")
     items = [
-        f"<b>Europe — renewables already win at moderate RE.</b> Carbon-priced, expensive "
+        f"<b>Europe — renewables already win at moderate shares.</b> Carbon-priced, expensive "
         f"EU gas (rising from ${eu['gas_pure'][0]:.0f} to ${eu['gas_pure'][-1]:.0f}/MWh) "
-        f"means a firm 70% renewable build reaches parity ~{eu70:.0f}, and even 90% RE by "
-        f"~{eu90:.0f}.",
-        f"<b>US — cheap gas is a moat at high RE.</b> Untaxed ~$46/MWh gas keeps 90% RE off "
-        f"parity beyond {us['years'][-1]} (US 90% crossover {_crossover(us,'0.90')}); only "
-        f"moderate-RE builds cross, in the mid-to-late 2030s.",
-        "<b>A firm battery-only system tops out near ~94% RE.</b> Multi-day Dunkelflaute "
+        f"means a firm 70%-renewable build reaches parity ~{eu70:.0f}, and even a "
+        f"90%-renewable one by ~{eu90:.0f}.",
+        f"<b>US — cheap gas is a moat at high renewable shares.</b> Untaxed ~$46/MWh gas "
+        f"keeps a 90%-renewable build off parity beyond {us['years'][-1]} (US 90% crossover "
+        f"{_crossover(us,'0.90')}); only moderate-share builds cross, in the mid-to-late 2030s.",
+        "<b>A firm battery-only system tops out near ~94% renewable.</b> Multi-day Dunkelflaute "
         "neither sun nor wind covers, and battery power can't bridge days — the last few "
-        "percent always fall to gas. Going higher needs long-duration storage or H₂.",
+        "percent always fall to gas. Going higher needs long-duration storage or hydrogen.",
         f"<b>A fully gas-free, zero-carbon datacenter is feasible.</b> A co-optimised "
-        f"solar+wind+battery+green-H₂ build delivers ${eu['h2_system']['lcoe'][0]:.0f}→"
+        f"solar+wind+battery+green-hydrogen build delivers ${eu['h2_system']['lcoe'][0]:.0f}→"
         f"${eu['h2_system']['lcoe'][-1]:.0f}/MWh in the EU, crossing below gas around "
         f"{'%.0f' % _parity_year(eu['years'], eu['h2_system']['lcoe'], eu['gas_pure'])}.",
         "<b>Where you build dominates the cost.</b> Across a poor→good site in a region the "
-        "90% RE delivered cost spans tens of $/MWh (the shaded bands in the figures); a "
-        "multi-site portfolio softens the multi-day lulls and cuts high-RE cost materially.",
-        "<b>Off-grid is itself a premium.</b> Staying on the grid with a renewable PPA sits "
-        "<i>below</i> the off-grid high-RE optimum in both regions — off-grid buys siting "
-        "independence, at a cost.",
+        "90%-renewable delivered cost spans tens of $/MWh (the shaded bands in the figures); a "
+        "multi-site portfolio softens the multi-day lulls and cuts high-renewable cost materially.",
+        "<b>Off-grid is itself a premium.</b> Staying on the grid with a renewable-energy "
+        "contract sits <i>below</i> the off-grid high-renewable optimum in both regions — "
+        "off-grid buys siting independence, at a cost.",
     ]
     return "".join(f"<li>{x}</li>" for x in items)
 
@@ -206,8 +206,10 @@ All numbers below are generated directly from the model's exported results.</div
   <div><h3 style="margin:.2em 0">United States</h3>{us_table}</div>
   <div><h3 style="margin:.2em 0">Europe</h3>{eu_table}</div>
 </div>
-<p class="sub" style="font-size:13.5px;margin-top:.6em">Firm (always-on) workload; gas backup
-sized to 100% of load. "Crossover" = first year the build's cost drops below the gas baseline.</p>
+<p class="sub" style="font-size:13.5px;margin-top:.6em">The <b>renewable target</b> is the minimum
+share of the datacenter's yearly energy that must come from solar + wind + battery (the rest is
+covered by gas). Firm (always-on) workload; gas backup sized to 100% of load. "Crossover" = the
+first year the build's delivered cost drops below the gas baseline.</p>
 
 <h2>Cost trajectories</h2>
 <div class="figs">
@@ -219,9 +221,9 @@ sized to 100% of load. "Crossover" = first year the build's cost drops below the
 </div>
 <div class="figs" style="margin-top:18px">
   <figure><img src="{fig3_us}" alt="US optimal mix"><figcaption>US optimal build (solar / wind
-   overbuild + battery hours) by RE target.</figcaption></figure>
+   overbuild + battery hours) by renewable target.</figcaption></figure>
   <figure><img src="{fig3_eu}" alt="EU optimal mix"><figcaption>Europe optimal build — the firm
-   high-RE optimum is wind-heavy to ride out multi-day lulls.</figcaption></figure>
+   high-renewable optimum is wind-heavy to ride out multi-day lulls.</figcaption></figure>
 </div>
 
 <h2>Key assumptions</h2>
@@ -238,7 +240,7 @@ case is a known, capped fuel cost. Premium/AI workloads never shed and collapse 
 resource and sun–wind correlation). A real-weather seam (<code>--weather</code>, ERA5/NSRDB)
 and a multi-site portfolio (<code>--sites</code>) are built in but opt-in.</li>
 <li><b>Single site by default</b> — the largest directional caveat; a geographic portfolio
-softens the tails and lowers high-RE cost.</li>
+softens the tails and lowers high-renewable cost.</li>
 <li><b>Not modelled:</b> sub-hourly load variation, on-site fuel logistics, transmission.</li>
 </ul>
 
