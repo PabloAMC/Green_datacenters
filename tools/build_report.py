@@ -21,6 +21,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+REPO_URL = "https://github.com/PabloAMC/Green_datacenteres"
+
 from lcoe.params import (SOLAR, WIND, SOLAR_EU, WIND_EU, BATTERY_US, BATTERY_EU,
                          GAS, GAS_EU, REGIONS, RESOURCE_PRESETS, MODEL_VERSION)  # noqa: E402
 MILESTONES = [2025, 2030, 2035, 2040]
@@ -159,7 +161,11 @@ body{{font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;col
 .wrap{{max-width:980px;margin:0 auto;padding:32px 20px 64px}}
 h1{{font-size:30px;margin:.2em 0 .1em}} h2{{font-size:21px;margin:1.8em 0 .5em;
   border-bottom:2px solid var(--line);padding-bottom:.25em}}
-.sub{{color:var(--muted);font-size:17px;margin:0 0 1.2em}}
+.sub{{color:var(--muted);font-size:17px;margin:0 0 .6em}}
+.repo{{margin:0 0 1.2em}}
+.repo a{{display:inline-block;background:var(--blue);color:#fff;padding:7px 14px;
+  border-radius:8px;font-size:14px;font-weight:600;text-decoration:none}}
+.repo a:hover{{background:#2f6fe0}}
 .caveat{{background:#fff8e6;border:1px solid #f0d98a;border-radius:10px;padding:14px 18px;
   font-size:14.5px;color:#6b5512}}
 ul.find{{padding-left:20px}} ul.find li{{margin:.5em 0}}
@@ -184,6 +190,7 @@ a{{color:var(--blue)}}
 <p class="sub">The least-cost mix of solar, wind, battery and gas backup to run an
 always-on, off-grid datacenter on mostly-renewable power — and the year going renewable
 beats burning gas, across the US and Europe.</p>
+<p class="repo"><a href="{repo}">▶&nbsp; View the source code &amp; full methodology on GitHub</a></p>
 
 <div class="caveat"><b>Read this first.</b> This is a <b>stylised techno-economic model</b>:
 trust the <b>directional comparisons</b>, not absolute numbers to better than <b>~±20–30%</b>.
@@ -237,8 +244,8 @@ softens the tails and lowers high-RE cost.</li>
 
 <div class="foot">
 Model v{version} · generated from <code>output/*_firm_results.json</code> at commit
-<code>{commit}</code> (config {cfg}) · <a href="https://github.com/PabloAMC/Green_datacenteres">source
-on GitHub</a> · licensed CC BY 4.0. Reproduce: <code>make reproduce &amp;&amp; make report</code>.
+<code>{commit}</code> (config {cfg}) · <a href="{repo}">source on GitHub</a> · licensed
+CC BY 4.0. Reproduce: <code>make reproduce &amp;&amp; make report</code>.
 </div>
 </div></body></html>"""
 
@@ -257,6 +264,7 @@ def main():
         version=MODEL_VERSION,
         commit=prov.get("git_commit", "—"),
         cfg=prov.get("config_sha256", "—"),
+        repo=REPO_URL,
     )
     out = os.path.join(ROOT, "docs", "index.html")
     os.makedirs(os.path.dirname(out), exist_ok=True)
