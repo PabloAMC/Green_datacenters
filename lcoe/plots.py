@@ -44,16 +44,36 @@ REFS  = "Lazard v18 · Way et al. Joule 2022 · NREL ATB 2024 · EU ETS · IPCC 
 PALETTE = ["#3A86FF", "#FF9F1C", "#2EC4B6", "#9D4EDD", "#FB5607", "#E71D36"]
 
 
-def _crossings(ax, years, series, baseline, color, label):
-    diff = series - baseline
-    idxs = np.where(np.diff(np.sign(diff)))[0]
-    for idx in idxs:
-        frac = diff[idx] / (diff[idx] - diff[idx+1])
+def _find_crossings(years, series, baseline, color, label):
+    """Interpolated points where `series` crosses `baseline` → [(cx, cy, color, label)]."""
+    diff = np.asarray(series, float) - np.asarray(baseline, float)
+    out = []
+    for idx in np.where(np.diff(np.sign(diff)))[0]:
+        denom = diff[idx] - diff[idx + 1]
+        if denom == 0:
+            continue
+        frac = diff[idx] / denom
         cx = years[idx] + frac
-        cy = baseline[idx] + frac * (baseline[idx+1] - baseline[idx])
-        ax.plot(cx, cy, "o", color=color, ms=7, zorder=5)
-        ax.annotate(f"{label} {cx:.0f}", xy=(cx, cy), xytext=(10, 8),
-                    textcoords="offset points", fontsize=7, color=color,
+        cy = baseline[idx] + frac * (baseline[idx + 1] - baseline[idx])
+        out.append((float(cx), float(cy), color, label))
+    return out
+
+
+def _place_crossings(ax, crossings, min_dx=2.5, step=12, base_dy=7):
+    """Draw a marker at each crossing and a "{label} {year}" tag, stacking the tags
+    vertically when crossings fall within `min_dx` years of one another so they never
+    overlap (each call previously placed tags at a fixed offset, blind to the others)."""
+    for cx, cy, color, _ in crossings:
+        ax.plot(cx, cy, "o", color=color, ms=6, zorder=5)
+    placed = []   # (cx, level) of tags already laid down, for cluster de-confliction
+    for cx, cy, color, label in sorted(crossings, key=lambda c: c[0]):
+        level = 0
+        for px, plevel in placed:
+            if abs(cx - px) < min_dx:
+                level = max(level, plevel + 1)
+        placed.append((cx, level))
+        ax.annotate(f"{label} {cx:.0f}", xy=(cx, cy), xytext=(8, base_dy + level * step),
+                    textcoords="offset points", fontsize=7, color=color, zorder=6,
                     arrowprops=dict(arrowstyle="->", color=color, lw=0.8))
 
 
@@ -68,6 +88,7 @@ def plot_cost_trajectories(results, region="US"):
     # Legend labels are spelled out (no RE / SMR / PPA / CFE / H₂ acronyms) for readers
     # unfamiliar with the jargon; the gas-baseline label keeps its descriptive name (it
     # reflects the firming choice — natural gas or green hydrogen).
+    crossings = []
     for R, col in zip(Rs, PALETTE):
         sc = results["scenarios"][R]
         ax.plot(yrs, sc["opt_delivered"], color=col, lw=2,
@@ -75,7 +96,9 @@ def plot_cost_trajectories(results, region="US"):
         if "opt_delivered_reslo" in sc:
             ax.fill_between(yrs, sc["opt_delivered_reslo"], sc["opt_delivered_reshi"],
                             color=col, alpha=0.13, edgecolor="none")
-        _crossings(ax, yrs, sc["opt_delivered"], results["gas_pure"], col, f"{R:.0%}")
+        crossings += _find_crossings(yrs, sc["opt_delivered"], results["gas_pure"],
+                                     col, f"{R:.0%}")
+    _place_crossings(ax, crossings)
     ax.plot(yrs, results["gas_pure"], color=C_GAS, lw=2, ls="--", label=results["gas_name"])
     ax.plot(yrs, results["lcoe_smr"], color=C_SMR, lw=2, ls="-.",
             label="Small modular reactor (nuclear)")
