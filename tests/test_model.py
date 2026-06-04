@@ -290,9 +290,16 @@ def test_ccgt_ocgt_threshold():
 # ── 3. Weather: marginals preserved; synoptic factor only re-clusters ─────────
 
 def test_solar_cf_target():
-    # clear-sky annual mean ≈ irradiance/24; effective ≈ that × Beta(3,1.5) mean.
+    # v5.5: the clear-sky mean is pre-divided by the cloud mean so the EFFECTIVE
+    # (post-cloud) annual CF lands at irradiance/24 — removing the v5.4 cloud
+    # double-count. So clear-sky mean ≈ (irr/24)/CLOUD_MEAN, and the simulated CF ≈ irr/24.
+    from lcoe.weather import CLOUD_MEAN
     cs = m.solar_clearsky(5.5)
-    assert abs(cs.mean() - 5.5 / 24.0) < 0.01
+    assert abs(cs.mean() - (5.5 / 24.0) / CLOUD_MEAN) < 0.01, f"clearsky mean {cs.mean():.3f}"
+    rng = np.random.default_rng(0)
+    eff = np.mean([m.generate_weather_year(cs, 7.5, rng, 0.0, 0.5, 0.82)[0].mean()
+                   for _ in range(8)])
+    assert abs(eff - 5.5 / 24.0) < 0.015, f"effective solar CF {eff:.3f} != {5.5/24:.3f}"
 
 
 def test_cf_marginals_preserved_under_synoptic():
@@ -313,11 +320,30 @@ def test_cf_marginals_preserved_under_synoptic():
 
 
 def test_wind_cf_in_expected_band():
+    # v5.5: modern low-specific-power curve (rated 11 m/s) → US wind CF ~0.33,
+    # inside Lazard v18's onshore CF basis (0.30–0.55) the wind LCOE is quoted at.
     cs = m.solar_clearsky(5.5)
     rng = np.random.default_rng(7)
     w = np.mean([m.generate_weather_year(cs, 7.5, rng, 0.0, 0.5, 0.82)[1].mean()
                  for _ in range(6)])
-    assert 0.19 < w < 0.25, f"US wind CF out of band: {w:.3f}"
+    assert 0.30 < w < 0.38, f"US wind CF out of band: {w:.3f}"
+
+
+def test_cf_consistent_with_lazard_basis():
+    """v5.5 invariant: the simulated CFs sit inside the Lazard v18 CF bands the
+    imported generation LCOEs are levelised at (utility solar 0.20–0.30, onshore
+    wind 0.30–0.55) — so cost basis and dispatch refer to the same plant."""
+    import numpy as np
+    def cf(mi, mw, corr, phi):
+        cs = m.solar_clearsky(mi); rng = np.random.default_rng(1)
+        sw = [m.generate_weather_year(cs, mw, rng, corr, 0.5, phi) for _ in range(8)]
+        return np.mean([s.mean() for s, _ in sw]), np.mean([w.mean() for _, w in sw])
+    s_us, w_us = cf(5.5, 7.5, 0.0, 0.82)
+    s_eu, w_eu = cf(3.8, 7.0, -0.35, 0.85)
+    assert 0.20 <= s_us <= 0.30, f"US solar CF {s_us:.3f} outside Lazard basis"
+    assert 0.30 <= w_us <= 0.55, f"US wind CF {w_us:.3f} outside Lazard basis"
+    assert 0.13 <= s_eu <= 0.22, f"EU solar CF {s_eu:.3f}"   # lower-irradiance EU site
+    assert 0.25 <= w_eu <= 0.45, f"EU wind CF {w_eu:.3f}"
 
 
 # ── 4. Dispatch energy balance at known corner cases ──────────────────────────
@@ -405,9 +431,13 @@ def test_optimum_meets_re_constraint():
 
 def _quick_sim(mean_irr=5.5, mean_wind_ms=7.5, design_p90=False, years=2,
                R=0.80, seed=5):
+    # grid_steps=12: the v5.5 recalibration shifts optima to lower capacity (higher CF),
+    # where a coarse 8-step lattice over the wide 0–18× bounds places nodes too sparsely
+    # and can pin a worse node for one resource than another — a grid artifact, not an
+    # economic one. 12 steps resolves the low-capacity region adequately for the asserts.
     return m.run_simulation(
         solar=m.SOLAR, wind=m.WIND, battery=m.BATTERY_US, gas=m.GAS, smr=m.SMR,
-        sys=m._sys_with(m.SYSTEM, grid_steps=8, n_mc_weather=6), workload=m.FIRM,
+        sys=m._sys_with(m.SYSTEM, grid_steps=12, n_mc_weather=6), workload=m.FIRM,
         mean_irr=mean_irr, mean_wind_ms=mean_wind_ms, years=years,
         reliabilities=[R], n_cost_mc=8, seed=seed, design_p90=design_p90)
 
@@ -424,6 +454,24 @@ def test_p90_design_at_least_mean_cost():
         f"P90-designed below mean-designed: {list(zip(mean, p90))}"
     # default run does NOT carry the P90 series (opt-in only)
     assert "opt_delivered_p90" not in _quick_sim(design_p90=False)["scenarios"][0.80]
+
+
+def test_weather_years_hook_overrides_synthetic():
+    """v5.5 reanalysis seam: supplying explicit (solar, wind) traces makes the
+    simulator dispatch THOSE years (and report their CF) instead of synthesising —
+    the single integration point for real ERA5/NSRDB data."""
+    import numpy as np
+    cs = m.solar_clearsky(5.5)
+    rng = np.random.default_rng(11)
+    years = [m.generate_weather_year(cs, 7.5, rng, 0.0, 0.5, 0.82) for _ in range(3)]
+    sim = m.ChronologicalSimulator(
+        m._sys_with(m.SYSTEM, grid_steps=4, n_mc_weather=99),   # n_mc ignored when traces given
+        m.BATTERY_US, m.FIRM, 5.5, 7.5, seed=0, weather_years=years)
+    exp_s = float(np.mean([s.mean() for s, _ in years]))
+    exp_w = float(np.mean([w.mean() for _, w in years]))
+    assert abs(sim.sol_cf_mean - exp_s) < 1e-9 and abs(sim.win_cf_mean - exp_w) < 1e-9
+    # zero-build is still all-gas under supplied weather (sanity of dispatch path)
+    assert abs(sim.interp3(sim.gas_mean, 0.0, 0.0, 0.0) - 1.0) < 1e-9
 
 
 def test_resource_presets_consistent():

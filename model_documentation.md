@@ -1,19 +1,34 @@
 # Off-grid Datacenter LCOE Model — Technical Documentation
 
-**Model version:** v5.4  
+**Model version:** v5.5  
 **Code file:** `lcoe/` package (entry point `datacenter_lcoe.py`)  
 **Last verified:** June 2026  
-**All numerical values cross-checked against model output (`scratch/v54_run.log`)**
+**All numerical values cross-checked against model output (`output/*_results.json`)**
+
+**v5.5 — capacity-factor ↔ cost-basis consistency, and a reanalysis seam.** The model
+imports Lazard v18 generation LCOEs, which are levelised at Lazard's own capacity factors
+(utility solar 0.20–0.30, onshore wind 0.30–0.55). An LCOE is capex+FOM spread over a
+*specific* CF, so the dispatch must simulate that same CF — but through v5.4 it ran at
+≈0.15 solar / 0.22 wind, ~half the CF the cost assumed, so the imported \$/MWh and the
+simulated MWh referred to different plants and high-RE overbuild was overstated. v5.5 fixes
+both halves: a **solar cloud double-count** (the Beta cloud derate was applied on top of an
+already cloud-inclusive $\bar I$; effective CF 0.153→**0.227** US, 0.105→**0.158** EU; §4.1–4.2)
+and a **high-specific-power wind curve** (rated 13→11 m/s, cut-in 3.5→3.0; CF 0.22→**0.33**
+US, 0.18→**0.28** EU; §4.4–4.5). The US CFs and EU wind now sit inside Lazard's CF bands;
+EU solar (0.158) sits just below the US band, consistent with its weaker irradiance and its
+own EU-specific LCOE basis (§4.2). Net: high-RE
+delivered LCOE falls ~20–30% and parity moves earlier — **EU 90% RE ≈ 2029, 95% ≈ 2033;
+US 70–80% ≈ 2036, 85% ≈ 2040** (high-RE US still does not beat cheap gas in the horizon). A
+**reanalysis hook** (`ChronologicalSimulator(weather_years=…)` / `weather.load_weather_traces`)
+lets real ERA5/NSRDB years drive the dispatch unchanged. Tables below are regenerated
+against this baseline.
 
 **v5.4 — battery augmentation + throughput cycle counting; no optimiser hysteresis.**
 The battery cost moves from lumpy full-system replacement to **capacity augmentation**
 (top up the faded energy/cell capacity each year — standard practice and cheaper; §6),
 and degradation is driven by **throughput equivalent-full-cycles** from dispatch rather
 than the old 2σ(SoC) proxy. The optimiser's path-regularisation penalty was also removed
-(it caused year-to-year hysteresis in the reported mix; §8.4). Net effect: storage is
-~30–35% cheaper, so RE LCOE falls a further ~8–15% and parity moves earlier — **EU 90% RE
-≈ 2033, 95% ≈ 2035; US now reaches parity at 70–80% RE (~2038–39)** though high-RE US
-still never beats cheap gas. Tables below are regenerated against this baseline.
+(it caused year-to-year hysteresis in the reported mix; §8.4); storage is ~30–35% cheaper.
 
 **v5.3 — per-technology cost of capital.** A single flat WACC is replaced by
 differentiated, technology-specific financing (§8.3): solar/wind **5.5%** (low-risk,
@@ -253,10 +268,13 @@ $$\overline{\text{CF}}_{\text{cs}} = \frac{\bar{I}}{24}$$
 
 **Irradiance inputs:**
 
-| Region | $\bar{I}$ (kWh/m²/day) | Clear-sky CF | Source |
-|--------|------------------------|--------------|--------|
-| US (default) | 5.5 | 0.229 | NREL NSRDB |
-| EU (default) | 3.8 | 0.158 | EU JRC PVGIS |
+| Region | $\bar{I}$ (kWh/m²/day) | Clear-sky CF | Effective CF (post-cloud) | Source |
+|--------|------------------------|--------------|---------------------------|--------|
+| US (default) | 5.5 | 0.341 | 0.227 | NREL NSRDB |
+| EU (default) | 3.8 | 0.237 | 0.158 | EU JRC PVGIS |
+
+The clear-sky CF is normalised to $\bar I/24/0.667$ so the *effective* (delivered) CF after
+the stochastic cloud factor equals $\bar I/24$ — see §4.2 (v5.5 double-count fix).
 
 ### 4.2 Solar — stochastic cloud attenuation
 
@@ -264,19 +282,30 @@ Daily cloud cover $\xi_d \in [0,1]$ drawn from a Beta distribution with AR(1) pe
 
 $$\xi_d^* \sim \text{Beta}(\alpha=3,\; \beta=1.5) \qquad \mu = \frac{3}{4.5} = 0.667$$
 
-$$\xi_d = \rho_c \cdot \xi_{d-1} + (1-\rho_c) \cdot \xi_d^*, \qquad \rho_c = 0.45$$
+$$\xi_d = \rho_c \cdot \xi_{d-1} + (1-\rho_c) \cdot \xi_d^*, \qquad \rho_c = 0.35$$
 
 **Hourly solar capacity factor:**
 $$\text{CF}_{\text{sol}}(h) = \text{CF}_{\text{cs}}(h) \cdot \xi_{\lfloor h/24 \rfloor}$$
 
-**Resulting effective capacity factors (verified from simulation):**
+**Resulting effective capacity factors (v5.5, verified from simulation):**
 
 | Region | Clear-sky CF | Beta mean | Effective CF |
 |--------|--------------|-----------|--------------|
-| US | 0.229 | 0.667 | **0.152** |
-| EU | 0.158 | 0.667 | **0.105** |
+| US | 0.341 | 0.667 | **0.227** |
+| EU | 0.237 | 0.667 | **0.158** |
 
-These are consistent with moderately cloudy mid-latitude sites. For clear, arid sites (US Southwest, Spain), increase $\bar{I}$ to 6.5–7.0 to raise CF toward 0.22–0.28.
+**v5.5 — cloud double-count fixed.** Earlier versions normalised the clear-sky mean to
+$\bar I/24$ and *then* multiplied by the cloud factor (mean 0.667), applying cloud losses
+twice and depressing effective solar CF ~33% (US 0.229 → 0.152). Since $\bar I$ is an
+*actual* (cloud-inclusive) NSRDB/PVGIS average, the clear-sky mean is now pre-divided by
+the cloud mean ($\bar I/24/0.667$), so the *effective* CF lands at the physically-correct
+$\bar I/24$ (US **0.227**, EU **0.158**). The US value sits inside Lazard v18's utility-solar
+CF basis (0.20–0.30) that the imported US solar LCOE ($52/MWh) is levelised at. The EU value
+(0.158) is *below* that band — as expected for a lower-irradiance northern-European site —
+and is costed not against the US Lazard number but against a EU-specific solar LCOE ($60/MWh,
+`SOLAR_EU`) that is itself levelised at the lower European CF, so the cost↔CF consistency
+holds region by region. For clear, arid sites (US Southwest, Spain), raise $\bar I$ to
+6.5–7.0 for CF ≈ 0.27–0.29.
 
 ### 4.3 Solar-wind Gaussian copula correlation
 
@@ -319,24 +348,32 @@ $$u_h = \Phi(z_h) \qquad v_h = c \cdot (-\ln(1-u_h))^{1/k}, \qquad k=2.1,\; c = 
 
 **Verified capacity factors:**
 
-| Region | $\bar{v}$ (m/s) | Simulated CF | Analytic Weibull CF |
-|--------|-----------------|--------------|---------------------|
-| US | 7.5 | **0.216** | 0.221 |
-| EU | 7.0 | **0.176** | 0.180 |
+| Region | $\bar{v}$ (m/s) | Simulated CF (v5.5) |
+|--------|-----------------|---------------------|
+| US | 7.5 | **0.328** |
+| EU | 7.0 | **0.281** |
 
-The small residual gap (2%) comes from the seasonal modulation — winter amplification is partly offset by summer reduction, with asymmetric power curve response.
+**v5.5 — modern turbine.** The rated speed was lowered 13.0 → 11.0 m/s (cut-in 3.5 → 3.0;
+§4.5) to represent a modern **low-specific-power** onshore turbine (large rotor per rated
+kW), which is what utility fleets — and the Lazard onshore wind $/MWh — now assume. This
+lifts simulated CF from ≈0.22 to **0.33 (US) / 0.28 (EU)**, inside Lazard v18's onshore CF
+basis (0.30–0.55) the wind LCOE is levelised at. The old 13 m/s curve (CF ≈0.22) was a
+high-specific-power machine, inconsistent with the imported cost.
 
 ### 4.5 Wind power curve (IEC Class II)
 
 $$P_{\text{wind}}(v) = \begin{cases} 0 & v < v_{\text{ci}} \text{ or } v > v_{\text{co}} \\ \left(\frac{v - v_{\text{ci}}}{v_r - v_{\text{ci}}}\right)^3 & v_{\text{ci}} \leq v < v_r \\ 1 & v_r \leq v \leq v_{\text{co}} \end{cases}$$
 
-| Parameter | Value | Meaning |
-|-----------|-------|---------|
-| $v_{\text{ci}}$ | 3.5 m/s | Cut-in speed |
-| $v_r$ | 13.0 m/s | Rated speed |
+| Parameter | Value (v5.5) | Meaning |
+|-----------|--------------|---------|
+| $v_{\text{ci}}$ | 3.0 m/s | Cut-in speed |
+| $v_r$ | 11.0 m/s | Rated speed |
 | $v_{\text{co}}$ | 25.0 m/s | Cut-out speed |
 
-Consistent with a modern 3–5 MW turbine (Vestas V150, Siemens SG 5.0).
+Consistent with a modern **low-specific-power** onshore turbine (large rotor, ~10–11 m/s
+rated; e.g. Vestas V162-class, GE 6.1-158). These three speeds are exposed on
+`SystemParams` (`wind_v_ci`, `wind_v_rated`, `wind_v_cutout`), so a higher-specific-power
+machine or a stronger/weaker resource can be modelled without code changes.
 
 ### 4.6 Synoptic "Dunkelflaute" factor (v5)
 
@@ -365,7 +402,7 @@ chosen so $\text{corr}(z_1,z_2)=\rho$ exactly (validity requires $\lambda^2 \le 
 
 ### 5.1 3D precomputed grid
 
-Unlike a simple 2D grid over $(C, B)$ for a single source, v4 runs combined dispatch over all $15^3 = 3{,}375$ combinations of $(C_{\text{sol}}, C_{\text{win}}, B)$ simultaneously, vectorised in numpy. This correctly accounts for solar and wind feeding the same load and battery — the critical fix over the independent-surface approximation.
+Unlike a simple 2D grid over $(C, B)$ for a single source, the model runs combined dispatch over all $21^3 = 9{,}261$ combinations of $(C_{\text{sol}}, C_{\text{win}}, B)$ simultaneously (`grid_steps=21`, v5.1 right-sized lattice), vectorised in numpy. This correctly accounts for solar and wind feeding the same load and battery — the critical fix over the independent-surface approximation.
 
 ### 5.2 State variables
 
@@ -568,8 +605,8 @@ where $K_{\text{gas}}$ is the peak backup capacity factor (maximum hourly residu
 **Green-hydrogen firming (opt-in, `--firming h2`).** The firming block can instead burn
 purchased **green hydrogen** in an H₂-capable turbine — economically "a gas plant with
 pricey, zero-carbon fuel", so it reuses the entire formula above with $\varepsilon_g=0$
-(no combustion CO₂), a higher fuel price ($p_{\text{gas}}\approx\$35$/MMBtu ≈ \$4/kg LHV),
-and a modestly higher turbine capex. It trades EU carbon exposure for expensive fuel: at
+(no combustion CO₂), a higher fuel price ($p_{\text{gas}}=\$46$/MMBtu ≈ \$5.25/kg LHV,
+Lazard LCOH v4.0 unsubsidized PEM), and a modestly higher turbine capex. It trades EU carbon exposure for expensive fuel: at
 EU 90% RE the 100%-firming reference is ≈\$250/MWh (flat, carbon-free) vs natural gas's
 \$114→\$163 rising path, but because the firm system burns it only ~10% of hours, an RE+H₂
 build still lands well below pure H₂ and decarbonises the residual. Stylised & adjustable
@@ -889,50 +926,52 @@ The factor $-\sigma^2/2$ makes the draws mean-preserving: $E[\tilde{c}] = c$. Th
 ## 11. Key Results
 
 Headline = **FIRM (always-on)** workload: gas backup sized to 100% of load, nothing shed,
-capped opex. All values from `scratch/v54_run.log` (June 2026; 50 MC weather years, 21³ grid,
-Dunkelflaute weather, per-tech WACC, **v5.4 battery augmentation**). Premium/AI workloads
-collapse to firm under the economic shed test, so these are the relevant numbers for any
-valuable datacenter. (Tables are regenerated from the export via `tools/regen_doc_tables.py`.)
+capped opex. All values from `output/*_results.json` (June 2026; 50 MC weather years, 21³ grid,
+Dunkelflaute weather, per-tech WACC, v5.4 battery augmentation, **v5.5 CF recalibration**).
+Premium/AI workloads collapse to firm under the economic shed test, so these are the relevant
+numbers for any valuable datacenter. (Tables regenerated from the export via
+`tools/regen_doc_tables.py`.)
 
 ### US — Firm (always-on)
 
 | RE target | 2025 ($/MWh) | 2030 | 2035 | 2040 | vs gas 2025 | Crossover |
 |-----------|-------------|------|------|------|-------------|-----------|
-| 70% | 79.2 | 61.9 | 51.1 | 44.2 | +72% | ~2038 |
-| 80% | 91.1 | 66.6 | 53.1 | 44.2 | +98% | ~2039 |
-| 85% | 110.0 | 80.9 | 64.0 | 52.3 | +139% | >2040 |
-| 90% | 161.8 | 128.4 | 103.0 | 85.0 | +251% | >2040 |
-| 95% | 178.4 | 145.3 | 126.2 | 112.2 | +287% | >2040 |
+| 70% | 73.9 | 58.3 | 48.5 | 40.4 | +61% | ~2036 |
+| 80% | 83.4 | 61.0 | 48.4 | 40.4 | +81% | ~2036 |
+| 85% | 92.3 | 68.4 | 54.8 | 45.6 | +100% | ~2040 |
+| 90% | 126.4 | 94.1 | 75.3 | 62.2 | +174% | >2040 |
+| 95% | 156.8 | 124.9 | 110.2 | 94.5 | +240% | >2040 |
 | **Gas** | **46.1** | **46.1** | **46.1** | **46.1** | — | — |
 
 High-RE US still never beats gas within the horizon — cheap untaxed gas ($4/MMBtu → ~$46/MWh
-even at a 9% WACC) is a very low baseline, and high-RE needs heavy wind overbuild (~7–11×) to
-ride out multi-day lulls. But with v5.4's cheaper storage, **moderate-RE US now does reach
-parity** — 70% ≈ 2038, 80% ≈ 2039 — as solar/wind/battery learning carries 70–80% builds below
-$46 by the late 2030s. 90%+ remains >2040.
+even at a 9% WACC) is a very low baseline, and high-RE needs heavy wind overbuild to ride out
+multi-day lulls. With the v5.5 CF-consistent resource the moderate-RE builds need less
+overbuild, so **70–80% RE now reach parity ~2036 and 85% ~2040**; 90%+ remains >2040.
 
 ### Europe — Firm (always-on)
 
 | RE target | 2025 ($/MWh) | 2030 | 2035 | 2040 | vs gas 2025 | Crossover |
 |-----------|-------------|------|------|------|-------------|-----------|
-| 70% | 104.2 | 87.9 | 80.8 | 74.4 | −8% | **~2025** |
-| 80% | 115.4 | 92.1 | 81.8 | 74.5 | +1% | **~2025** |
-| 85% | 133.6 | 104.3 | 90.9 | 81.5 | +17% | **~2027** |
-| 90% | 181.7 | 150.1 | 131.8 | 113.6 | +60% | **~2033** |
-| 95% | 199.9 | 164.7 | 149.6 | 135.0 | +76% | **~2035** |
+| 70% | 98.6 | 85.3 | 78.2 | 72.0 | −13% | **~2025** |
+| 80% | 107.3 | 87.4 | 79.7 | 74.3 | −6% | **~2025** |
+| 85% | 118.5 | 92.8 | 82.0 | 74.4 | +4% | **~2026** |
+| 90% | 156.1 | 119.9 | 101.5 | 88.0 | +37% | **~2029** |
+| 95% | 180.3 | 154.9 | 132.7 | 120.7 | +59% | **~2033** |
 | **Gas** | **113.8** | **125.2** | **148.3** | **162.6** | — | — |
 
 EU gas is expensive and rising (carbon → logistic path toward $200/tCO₂). An always-on RE
-datacenter beats gas from ~2025 at 70–80% RE; **90% RE reaches parity ~2033, 95% ~2035.**
-Note how much later these still are than early versions: v4 claimed "90% parity Q2 2025." The
-move out to the early-to-mid 2030s is the cumulative effect of every honesty fix — no free
-load-shedding, multi-day Dunkelflaute, a properly-resolved optimiser, and (largest here) **no
-free demand-deferral**: an always-on datacenter must build enough firm capacity to ride out
-week-long lulls. v5.3's per-tech WACC and v5.4's cheaper (augmented) storage then pull parity
-progressively earlier (90% RE: v5.2 2035 → v5.3 2034 → v5.4 2033).
+datacenter beats gas from ~2025 at 70–80% RE; **90% RE reaches parity ~2029, 95% ~2033** under
+the v5.5 CF recalibration (vs ~2033 / ~2035 before). The earlier history still holds — v4
+claimed "90% parity Q2 2025", and the honesty fixes (no free load-shedding, multi-day
+Dunkelflaute, a resolved optimiser, no free demand-deferral) pushed that out to the 2030s; v5.5
+then corrects the *opposite* error (a CF below the imported cost basis) and pulls 90% back to
+the late 2020s.
 
-**Optimal EU 90% RE build (2025):** ≈ 10.9× solar + 10.0× wind + 6h storage. Note the huge
-generation overbuild but only ~6h battery — see the next subsection.
+**Optimal EU 90% RE build (2025):** ≈ **6.4× solar + 5.0× wind + 6h storage** — roughly half
+the nameplate overbuild of the pre-v5.5 ~11× solar + 10× wind, because the CF-consistent
+resource (solar 0.16 / wind 0.28) generates the same energy from far less capacity. Storage
+stays ~6h: the binding constraint is multi-day Dunkelflaute energy, which generation overbuild
+covers more cheaply than batteries.
 
 ### Why so much overbuild but only ~6h of battery?
 
@@ -975,7 +1014,7 @@ unaffected (they never shed).
 penalty) point at reduced fidelity (coarser grid, fewer MC years) and wider bounds. Treat its
 absolute LCOE as indicative; the *shape* of the trade-off surface is the point.
 
-**Synoptic factor is calibrated, not fitted.** The Dunkelflaute structure (§4.6) uses plausible loadings/persistence ($\lambda=0.5$, $\varphi\approx0.82$–0.85) rather than values fitted to multi-decade ERA5 reanalysis at a specific site. It restores realistic multi-day clustering and correct directionality, but the exact frequency/depth of week-scale lulls — which sets high-RE storage/backup — should be validated against site reanalysis before siting decisions. It is also single-site; geographic aggregation would soften the tails. **This is the single largest accuracy gap** and the highest-value next improvement.
+**Synoptic factor is calibrated, not fitted.** The Dunkelflaute structure (§4.6) uses plausible loadings/persistence ($\lambda=0.5$, $\varphi\approx0.82$–0.85) rather than values fitted to multi-decade ERA5 reanalysis at a specific site. It restores realistic multi-day clustering and correct directionality, but the exact frequency/depth of week-scale lulls — which sets high-RE storage/backup — should be validated against site reanalysis before siting decisions. It is also single-site; geographic aggregation would soften the tails. **This is the single largest accuracy gap** and the highest-value next improvement. v5.5 adds the integration seam for closing it: `ChronologicalSimulator(..., weather_years=...)` (and `weather.load_weather_traces`) dispatches supplied real ERA5/NSRDB hourly CF years instead of the synthetic generator, leaving the optimiser, costing and figures unchanged — so wiring a reanalysis feed is now a data step, not a code change.
 
 **Gas CF approximation.** The gas backup LCOE uses $f_{\text{gas}}$ as both the gas plant capacity factor and the energy fraction; capacity capital is separately peak-scaled (firm → 100% of load). Reasonable since dispatch runs gas only when battery (and any shedding) are exhausted.
 
@@ -991,9 +1030,30 @@ absolute LCOE as indicative; the *shape* of the trade-off surface is the point.
 
 **Generation degradation is embedded, not double-counted.** The exogenous Lazard `lcoe_today` already includes module degradation and inverter replacement, so the model does **not** add them again (that would double-count). A `TechParams.degradation_per_yr` knob exists (default **0**) for use with degradation-free input LCOEs; when >0 it inflates delivered LCOE by $1/(1-\tfrac12\,\text{deg}\cdot\text{life})$. Battery degradation, by contrast, *is* modelled explicitly (§6).
 
-**Wind CF is conservative.** The default mean speeds (US 7.5 m/s, EU 7.0 m/s) with the IEC Class II curve give simulated CFs of ≈0.22 (US) / ≈0.19 (EU) — below modern, well-sited, high-hub-height, low-specific-power onshore fleets (US ≈0.33–0.40, EU ≈0.24–0.30). Like the conservative solar CF, this biases the model *against* renewables (more overbuild needed), so the headline "RE is hard/expensive off-grid" conclusion is if anything a lower bound on RE competitiveness. Raise `mean_wind_ms` (or lower the rated/cut-in speeds for a modern low-specific-power turbine) for good wind sites.
+**Capacity factors are CF-basis-consistent (v5.5).** An imported LCOE is capex+FOM
+levelised over a *specific* capacity factor, so the dispatch must simulate that same CF or
+the cost basis is internally inconsistent. Through v5.4 it was not: the default resource
+simulated US solar ≈0.15 / wind ≈0.22, roughly **half** the CF (utility solar 0.20–0.30,
+onshore wind 0.30–0.55) that the Lazard v18 generation LCOEs it imports are quoted at —
+inflating required overbuild and biasing high-RE cost upward. v5.5 fixes both halves: the
+solar cloud **double-count** (effective CF 0.153 → **0.227** US, 0.105 → **0.158** EU) and
+the **wind power curve** (rated 13 → 11 m/s; CF 0.22 → **0.33** US, 0.18 → **0.28** EU).
+The US CFs and EU wind now sit inside Lazard's bands; EU solar (0.158) sits just below the US
+solar band and is matched instead to a EU-specific solar LCOE levelised at that lower CF — so
+the imported \$/MWh and the simulated MWh refer to the same plant region by region. Net effect
+on the headline: high-RE delivered LCOE falls materially
+(≈20–30% at 90% RE) and EU parity moves earlier; the *direction* of the prior "conservative
+CF" caveat was right, but the magnitude was large and the inconsistency is now removed.
 
-**Resource-quality sensitivity (`RESOURCE_PRESETS`, `--resource` / `--resource-sweep`).** To quantify the bias above, each region has a `default` (conservative, headline) and a `good` (modern well-sited) resource preset — US `good` = 6.8 kWh/m²/day & 9.0 m/s → simulated CF solar 0.18 / wind 0.34; EU `good` = 4.6 & 8.5 → 0.13 / 0.30. `run_resource_sensitivity` (CLI `--resource-sweep`) re-runs the firm model at both levels and tabulates LCOE and parity. The good resource lowers 90%-RE LCOE by **~15–20%**, but the qualitative conclusions hold: **US still never reaches gas parity** within the horizon (cheap untaxed gas is a moat even on a great site), while EU parity moves **earlier**. The solar CF stays moderate even at `good` because the Beta(3,1.5) cloud model is conservative; the larger mover is wind. (`default` exactly equals the headline resource, so it does not change any published number.)
+**Resource-quality sensitivity (`RESOURCE_PRESETS`, `--resource` / `--resource-sweep`).**
+Each region has a `default` (CF-basis-consistent average site) and a `good` (modern
+well-sited) preset — US `good` = 6.8 kWh/m²/day & 9.0 m/s → simulated CF solar 0.26 / wind
+0.45; EU `good` = 4.6 & 8.5 → 0.19 / 0.41. `run_resource_sensitivity` (CLI
+`--resource-sweep`) re-runs the firm model at both levels and tabulates LCOE and parity. The
+good resource lowers 90%-RE LCOE further and pulls EU parity earlier; whether **US** high-RE
+crosses cheap untaxed gas within the horizon is now close and resource-dependent rather than
+a hard never — re-run the suite for the current crossover. (`default` exactly equals the
+headline resource, so it defines the published numbers.)
 
 ### Accuracy summary — what to trust
 

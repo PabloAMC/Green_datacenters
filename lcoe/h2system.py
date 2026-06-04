@@ -110,7 +110,9 @@ def h2_system_trajectory(solar, wind, battery, mean_irr, mean_wind_ms, sys, year
             cs, mean_wind_ms, rng, wind_solar_corr=sys.wind_solar_corr,
             syn_loading=sys.syn_loading, syn_persistence=sys.syn_persistence,
             cloud_ar1=sys.cloud_ar1, wind_ar1=sys.wind_ar1,
-            wind_daily_share=sys.wind_daily_share, wind_seasonal_amp=sys.wind_seasonal_amp)
+            wind_daily_share=sys.wind_daily_share, wind_seasonal_amp=sys.wind_seasonal_amp,
+            wind_v_ci=sys.wind_v_ci, wind_v_rated=sys.wind_v_rated,
+            wind_v_cutout=sys.wind_v_cutout)
         sol2d[k] = s; win2d[k] = w
     CF_sol, CF_win = float(sol2d.mean()), float(win2d.mean())
 

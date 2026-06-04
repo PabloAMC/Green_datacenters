@@ -2,26 +2,83 @@ from __future__ import annotations
 
 """Synthetic 8760-h solar & wind generation with Dunkelflaute structure."""
 import math
-from typing import Tuple
+from typing import List, Tuple
 
 import numpy as np
 from scipy.special import ndtr, betaincinv
+
+
+def load_weather_traces(path: str) -> "List[Tuple[np.ndarray, np.ndarray]]":
+    """
+    Load real reanalysis weather years for the dispatch's `weather_years` hook.
+
+    Returns a list of (solar_cf[8760], wind_cf[8760]) pairs — one per year — that
+    `ChronologicalSimulator(..., weather_years=...)` consumes INSTEAD of the synthetic
+    generator. Each array is an hourly capacity factor in [0,1].
+
+    Expected input: an `.npz` with arrays `solar` and `wind`, each shaped (Y, 8760)
+    (Y reanalysis years). This is the single integration point for real data — to wire
+    a live feed, materialise such a file from a provider and point the CLI at it:
+
+      • ERA5 (ECMWF / Copernicus CDS): hourly `ssrd` → GHI → PV AC CF (apply a system
+        derate / tracking model); `100m wind speed` → hub height → the IEC power curve
+        in this module. Needs a free CDS API key.
+      • NREL NSRDB (solar) + WIND Toolkit (wind): hourly site CF directly; needs a
+        free NREL API key.
+
+    Convert each provider year to a 2×8760 CF pair, stack to (Y,8760), and save. Keeping
+    the loader file-based (not network-bound) keeps the model deterministic, offline,
+    and provider-agnostic; only this function changes to support a new source.
+    """
+    with np.load(path) as d:
+        solar, wind = np.asarray(d["solar"], float), np.asarray(d["wind"], float)
+    if solar.shape != wind.shape or solar.shape[1] != 8760:
+        raise ValueError(f"expected solar/wind shaped (Y, 8760); got {solar.shape}, {wind.shape}")
+    return [(solar[i], wind[i]) for i in range(solar.shape[0])]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. WEATHER GENERATION  (Gaussian copula solar-wind correlation)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Daily cloud-transmission marginal: Beta(α,β). Its mean is the average fraction of
+# clear-sky irradiance that reaches the panel. Defined here (one source) so the
+# clear-sky normaliser and the cloud draw in generate_weather_year stay consistent.
+CLOUD_BETA_A, CLOUD_BETA_B = 3.0, 1.5
+CLOUD_MEAN = CLOUD_BETA_A / (CLOUD_BETA_A + CLOUD_BETA_B)   # 0.667
+
+
 def solar_clearsky(mean_irr_kwh_m2_day: float) -> np.ndarray:
+    """
+    Deterministic 8760-h clear-sky AC capacity-factor trace.
+
+    `mean_irr_kwh_m2_day` is the site's *actual* (cloud-inclusive) average GHI, as
+    reported by NSRDB / PVGIS. The downstream stochastic cloud factor (mean
+    `CLOUD_MEAN`) multiplies this trace, so to land the *effective* (delivered)
+    annual CF at the physically-correct `mean_irr/24` we normalise the clear-sky
+    mean to `mean_irr/24 / CLOUD_MEAN`. (v5.5 fix: previously the clear-sky mean was
+    set to `mean_irr/24` and the cloud factor was then applied *again*, double-counting
+    cloud losses and depressing the simulated solar CF ~33% below NSRDB/Lazard — e.g.
+    US 0.153 vs the ~0.22–0.25 implied by the same Lazard LCOE inputs.)
+    """
     hours = np.arange(8760)
     doy   = hours // 24
     hod   = hours % 24
     seasonal = 1.0 + 0.35 * np.cos(2 * np.pi * (doy - 172) / 365)
     diurnal  = np.clip(np.sin((hod - 6) * np.pi / 12), 0, 1) ** 1.1
     raw = diurnal * seasonal
-    target_cf = mean_irr_kwh_m2_day / 24.0
-    mean_raw  = raw.mean()
-    return np.clip(raw * (target_cf / mean_raw if mean_raw > 0 else 1), 0, 1)
+    # Pre-divide by the cloud mean so that E[clear-sky × cloud] = mean_irr/24.
+    target_cf = mean_irr_kwh_m2_day / 24.0 / CLOUD_MEAN
+    # Iterate once to absorb the (small) clip at 1.0 of summer-noon hours, so the
+    # *clipped* trace still carries the intended mean rather than losing the peaks.
+    cs = raw * (target_cf / raw.mean() if raw.mean() > 0 else 1.0)
+    for _ in range(3):
+        clipped = np.clip(cs, 0.0, 1.0)
+        m = clipped.mean()
+        if m <= 0:
+            break
+        cs = cs * (target_cf / m)
+    return np.clip(cs, 0.0, 1.0)
 
 
 def generate_weather_year(
@@ -35,6 +92,9 @@ def generate_weather_year(
     wind_ar1: float = 0.75,
     wind_daily_share: float = 0.50,
     wind_seasonal_amp: float = 0.12,
+    wind_v_ci: float = 3.0,
+    wind_v_rated: float = 11.0,
+    wind_v_cutout: float = 25.0,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Synthetic 8760h solar + wind capacity factors with (v5) a persistent
@@ -81,9 +141,9 @@ def generate_weather_year(
     z1 = lam * f + math.sqrt(one_m) * g1   # → cloud,  Var=1
     z2 = lam * f + math.sqrt(one_m) * g2   # → wind,   Var=1
 
-    # Cloud factor: Beta(3, 1.5) marginal via probability integral transform
+    # Cloud factor: Beta(α, β) marginal via probability integral transform
     u_cloud = np.clip(ndtr(z1), 1e-6, 1 - 1e-6)
-    daily_raw = betaincinv(3.0, 1.5, u_cloud)
+    daily_raw = betaincinv(CLOUD_BETA_A, CLOUD_BETA_B, u_cloud)
 
     # Wind: Weibull(k=2.1) marginal
     k = 2.1
@@ -130,7 +190,12 @@ def generate_weather_year(
     doy = np.arange(8760) // 24
     speeds *= 1.0 + wind_seasonal_amp * np.cos(2 * np.pi * (doy - 15) / 365)
 
-    v_ci, v_r, v_co = 3.5, 13.0, 25.0
+    # IEC power curve. v5.5: rated speed lowered 13.0 → 11.0 m/s (and cut-in 3.5 → 3.0)
+    # to represent a modern LOW-SPECIFIC-POWER onshore turbine (large rotor / rated kW),
+    # which is what utility fleets and Lazard's $/MWh now assume. The old 13 m/s rated
+    # (high-specific-power) curve gave CF ≈ 0.22 at 7.5 m/s — below Lazard's onshore
+    # CF basis (0.30–0.55) and inconsistent with the wind LCOE imported from it.
+    v_ci, v_r, v_co = wind_v_ci, wind_v_rated, wind_v_cutout
     wind = np.where(speeds < v_ci, 0.0,
            np.where(speeds >= v_co, 0.0,
            np.where(speeds >= v_r, 1.0,

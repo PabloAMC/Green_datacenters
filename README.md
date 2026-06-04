@@ -1,10 +1,12 @@
-# Off-Grid Datacenter LCOE Model (v5.4)
+# Off-Grid Datacenter LCOE Model (v5.5)
 
 An optimization model that finds the least-cost combination of solar PV, onshore wind, LFP battery storage, and natural gas backup to power an off-grid datacenter at a target renewable energy fraction, across the **US** and **Europe**.
 
 The **default model is a FIRM, always-on datacenter**: gas turbines are sized to cover **100% of load** whenever sun/wind are absent and batteries are exhausted, so the datacenter never shuts down and the worst case is a known, **capped opex** (run on gas). Solar + wind + battery are an incremental investment that displaces gas fuel and carbon where it pays. Optionally, a workload can be made **interruptible** (cheap/spot compute), in which case the model sheds load only when the lost compute is worth less than the gas needed to serve it.
 
-> **v5.4 — battery augmentation + throughput cycle counting; no optimiser hysteresis.** Storage cost moves from lumpy full-replacement to **capacity augmentation** (top up faded cells yearly — standard practice, ~30–35% cheaper); cycling is counted as **throughput equivalent-full-cycles**; and the optimiser's path-regularisation penalty (a source of year-to-year hysteresis) is removed. Net: RE LCOE falls a further ~8–15% → **EU 90% RE parity ~2033, 95% ~2035; US now reaches parity at 70–80% RE (~2038–39)** (90%+ still never beats cheap US gas).
+> **v5.5 — capacity-factor ↔ cost-basis consistency, and a reanalysis seam.** The dispatch previously simulated US solar ≈0.15 / wind ≈0.22 capacity factors — roughly **half** the CF (utility solar 0.20–0.30, onshore wind 0.30–0.55) that the **Lazard v18** generation LCOEs it *imports* are levelised at, so the imported \$/MWh and the simulated MWh referred to different plants. v5.5 fixes both halves: a **solar cloud double-count** (effective CF 0.153→0.227 US, 0.105→0.158 EU) and a **high-specific-power wind curve** (rated 13→11 m/s; CF 0.22→0.33 US, 0.18→0.28 EU). The US CFs and EU wind now sit inside Lazard's CF bands; EU solar (0.158) sits just below the US band, matched to a EU-specific solar LCOE at that lower CF. Net: high-RE delivered LCOE falls materially (~20–30% at 90% RE) and EU parity moves earlier (re-run for current crossovers). Adds a **reanalysis hook** — `ChronologicalSimulator(weather_years=…)` / `weather.load_weather_traces` dispatches real ERA5/NSRDB years unchanged — so the synthetic-weather gap can be closed with data, not code.
+>
+> **v5.4 — battery augmentation + throughput cycle counting; no optimiser hysteresis.** Storage cost moves from lumpy full-replacement to **capacity augmentation** (top up faded cells yearly — standard practice, ~30–35% cheaper); cycling is counted as **throughput equivalent-full-cycles**; and the optimiser's path-regularisation penalty (a source of year-to-year hysteresis) is removed.
 >
 > **v5.3 — per-technology cost of capital.** A single flat WACC is replaced by differentiated financing: solar/wind **5.5%** (low-risk, long-life infrastructure), LFP battery **7%**, gas **9%** (merchant + carbon-policy risk). Legacy flat-7% is recoverable by setting each `wacc` to 0.07. See *Key Upgrades*.
 
@@ -18,7 +20,7 @@ The **default model is a FIRM, always-on datacenter**: gas turbines are sized to
 *   **`datacenter_lcoe.py`**: Thin backward-compatible entry point — re-exports the `lcoe` package API and runs the CLI, so `import datacenter_lcoe` and `python datacenter_lcoe.py` keep working unchanged.
 *   **`model_documentation.md`**: The technical reference — all mathematical formulations (Wright's Law learning curves, Gaussian-copula wind-solar coupling, synoptic Dunkelflaute factor, battery Wöhler degradation, CCGT/OCGT sizing, per-technology WACC, carbon trajectories, the economic-shed rule) with data sources and an accuracy summary.
 *   **`tools/regen_doc_tables.py`**: Regenerates the documentation result tables from the `output/` JSON export (so the doc numbers are never hand-transcribed).
-*   **`scratch/plot_comparison.py`**: Regenerates the US vs. Europe 90%-RE firm trajectory and annotates the parity crossover.
+*   **`scratch/plot_comparison.py`**: Regenerates the US vs. Europe 70%-RE firm trajectory against each region's gas baseline and annotates any EU/gas parity crossover.
 *   **`tests/test_model.py`**: Regression + unit tests (LCOE formulas, weather-CF marginals, dispatch energy balance, firm/shed consistency, RE feasibility). Runs standalone (`python tests/test_model.py`) or under `pytest` — no extra dependency required.
 *   **`output/`**: Machine-readable results written on every run — one tidy CSV (`<prefix>_results.csv`, a row per RE-target × year) and one structured JSON per region, so the figures and documentation tables can be regenerated programmatically instead of hand-transcribed.
 *   **`figs/`**: Generated plots per region — `fig1` cost trajectory (incl. the gas baseline, SMR, grid+PPA / 24/7-CFE references, and the **fully-optimised gas-free green-H₂ system**), `fig2` cost vs RE fraction, `fig3` optimal solar/wind/battery mix, `fig4`/`fig5` cost breakdown by factor split into **capex vs opex** (at 70% / 85% RE), **`fig6` the gas-free green-H₂ system breakdown** (generation / LFP / electrolyser / H₂ storage / turbine / purchased-H₂, all zero-carbon, with the pure-gas reference overlaid for comparison) — plus the US-vs-EU comparison (at 70% RE) and (via `--flex-sweep`) the flexibility trade-off heatmap.
@@ -81,18 +83,20 @@ python datacenter_lcoe.py --ldes-joint h2 --region eu
 Workload presets (`--workload`): `firm` (always-on, 0% shed) · `enterprise` (5% / $2500) · `training` (40% / $900) · `interruptible` (60% / $150) · `best-effort` (90% / $40). `--interruptible` = *fraction of load you may shed*; `--shed-penalty` = *value of the lost compute, $/MWh* (high = firm; the model only sheds when this is below the gas variable cost). Advanced: `--grid-steps`, `--mc`, `--years`, `--seed`.
 
 ### 4. Run the US vs. EU Comparison Plot
-Regenerates the firm US-vs-Europe 90%-RE trajectory and annotates the parity crossover (~Q4 2034 in EU):
+Regenerates the firm US-vs-Europe **70%-RE** trajectory against each region's gas baseline (and annotates any EU/gas crossover). Under the v5.5 CF recalibration EU 70% RE is already below gas from 2025, so no crossover point is drawn; the US 70% line crosses its much cheaper gas baseline only in the mid-2030s:
 ```bash
 PYTHONPATH=. python scratch/plot_comparison.py
 ```
 
 ---
 
-## 💡 Key Upgrades (v4 → v5.4)
+## 💡 Key Upgrades (v4 → v5.5)
 
-Each version removed an assumption that made high renewable fractions look cheaper/easier than they are. The cumulative effect is large: EU 90%-RE parity moved from v4's "Q2 2025" to **~2033** for an always-on datacenter.
+Most versions *removed* an assumption that made high renewable fractions look cheaper/easier than they are (pushing parity later); v5.5 instead *removes an inconsistency that made them look harder*, pulling EU 90%-RE parity from ~2033 to **~2029**.
 
--1. **Battery augmentation + throughput cycle counting; no hysteresis (v5.4, this release).** Storage cost moves from full-system replacement to yearly **capacity augmentation** (top up only the faded cells — ~30–35% cheaper); degradation is driven by **throughput equivalent-full-cycles** rather than a 2σ(SoC) proxy; and the optimiser's path-regularisation penalty (year-to-year hysteresis) is removed. Cheaper storage pulls parity earlier across the board.
+-2. **Capacity-factor ↔ cost-basis consistency + reanalysis seam (v5.5, this release).** The imported Lazard v18 generation LCOEs are levelised at utility-solar CF 0.20–0.30 and onshore-wind CF 0.30–0.55, but the dispatch was simulating ≈0.15 / 0.22 — so cost and energy referred to different plants. Two fixes: a **solar cloud double-count** (the cloud derate was applied twice; effective CF 0.153→0.227 US) and a **modern low-specific-power wind curve** (rated 13→11 m/s; CF 0.22→0.33 US). The US CFs and EU wind land inside the Lazard CF bands; EU solar (0.158) sits just below the US band, matched to a EU-specific solar LCOE at that lower CF. Net: 90%-RE LCOE falls ~20–30% and EU parity moves to the late 2020s. Also adds a **real-weather hook** (`weather_years=…` / `load_weather_traces`) so ERA5/NSRDB years can drive the dispatch unchanged.
+
+-1. **Battery augmentation + throughput cycle counting; no hysteresis (v5.4).** Storage cost moves from full-system replacement to yearly **capacity augmentation** (top up only the faded cells — ~30–35% cheaper); degradation is driven by **throughput equivalent-full-cycles** rather than a 2σ(SoC) proxy; and the optimiser's path-regularisation penalty (year-to-year hysteresis) is removed. Cheaper storage pulls parity earlier across the board.
 
 0.  **Per-technology cost of capital (v5.3).** A single flat WACC is replaced by differentiated real WACC + asset life: solar/wind **5.5%** (30/25 yr), battery **7%** (20 yr), gas **9%** (25 yr). The bundled generation LCOE is re-annualised at the new WACC (`rewacc_lcoe`); each component is levelised over its own life (fixing the prior mixed-horizon treatment). Cheaper RE and dearer gas pull EU parity ~1 yr earlier; the US moat holds.
 
@@ -106,19 +110,19 @@ Inherited from v4: 3D optimisation over (solar, wind, battery); Gaussian-copula 
 
 ---
 
-## 📊 Summary of Crossover Results (FIRM / always-on, v5.4)
+## 📊 Summary of Crossover Results (FIRM / always-on, v5.5)
 
-From `scratch/v54_run.log` (tables regenerable via `tools/regen_doc_tables.py`). These are the relevant numbers for any valuable datacenter (premium/AI workloads never shed and collapse to firm). Gas baseline: US flat ~$46/MWh; EU rising from $114 (2025) to $163 (2040) as carbon prices climb.
+Tables regenerable via `tools/regen_doc_tables.py` from `output/*_results.json`. These are the relevant numbers for any valuable datacenter (premium/AI workloads never shed and collapse to firm). Gas baseline: US flat ~$46/MWh; EU rising from $114 (2025) to $163 (2040) as carbon prices climb. **All numbers below are the v5.5 CF-recalibrated results** (US solar 0.23 / wind 0.33, EU 0.16 / 0.28 — consistent with the Lazard CF basis of the imported LCOEs).
 
-> **On-grid reference (new).** Every trajectory/reliability figure and the summary now also plot a **Grid + renewable-PPA** line — the realistic alternative of staying on the grid and signing a renewable PPA (all-in ≈ \$75/MWh US, \$117/MWh EU in 2025, declining with the solar learning curve). It sits *below* the off-grid high-RE optimum in both regions, making explicit that **going off-grid is itself a cost premium**. A second line, **Grid + 24/7 CFE**, adds a premium for hour-by-hour carbon-free matching (≈\$115/MWh US, \$172/MWh EU in 2025). Both are annual-vs-hourly reference lines — not part of the optimisation.
+> **On-grid reference.** Every trajectory/reliability figure and the summary also plot a **Grid + renewable-PPA** line — the realistic alternative of staying on the grid and signing a renewable PPA (all-in ≈ \$75/MWh US, \$117/MWh EU in 2025, declining with the solar learning curve). It sits *below* the off-grid high-RE optimum in both regions, making explicit that **going off-grid is itself a cost premium**. A second line, **Grid + 24/7 CFE**, adds a premium for hour-by-hour carbon-free matching (≈\$115/MWh US, \$172/MWh EU in 2025). Both are annual-vs-hourly reference lines — not part of the optimisation.
 
 ### US — 90% RE
-*   **2025 LCOE:** $161.8/MWh; **2040:** $85.0/MWh. **Parity (90% RE): >2040.** But **70–80% RE now reach parity ~2038–39** as cheaper (augmented) storage carries moderate-RE builds below $46.
-*   *Why?* Extremely cheap, untaxed US gas (~$46/MWh even at a 9% WACC) is a moat clean energy can't cross within the horizon at *high* RE fractions, where heavy wind overbuild (~7–11×) is needed for multi-day lulls.
+*   **2025 LCOE:** $126.4/MWh; **2040:** $62.2/MWh. **Parity (90% RE): >2040.** But **70–80% RE now reach parity ~2036**, and **85% ~2040**, as the CF-consistent build needs less overbuild.
+*   *Why?* Extremely cheap, untaxed US gas (~$46/MWh even at a 9% WACC) is a moat clean energy still can't cross within the horizon at *high* RE fractions, where heavy wind overbuild is needed for multi-day lulls.
 
 ### Europe — 90% RE
-*   **2025 LCOE:** $181.7/MWh; **2040:** $113.6/MWh. **Parity: ~2033** (70–80% RE reach parity ~2025; **85% ~2027**; 95% ~2035).
-*   *Why?* Expensive, carbon-taxed EU gas makes RE competitive — but an *always-on* datacenter must build enough firm capacity (≈11× solar + 10× wind + 6h battery at 90%) to ride out week-long Dunkelflaute, which keeps 90%+ parity in the mid-2030s.
+*   **2025 LCOE:** $156.1/MWh; **2040:** $88.0/MWh. **Parity: ~2029** (70–80% RE reach parity ~2025; **85% ~2026**; 95% ~2033).
+*   *Why?* Expensive, carbon-taxed EU gas makes RE competitive — and with CF-consistent resource the always-on build that rides out week-long Dunkelflaute now reaches 90% parity by the **late 2020s** (vs the mid-2030s before the v5.5 recalibration).
 
 ### If the compute is cheap (interruptible)
 For low-value/spot compute, shedding the most expensive hours helps a lot: at EU 90% RE in 2030, a 95%-interruptible workload valued at $25/MWh reaches roughly the gas variable cost (parity by 2025) versus the firm ~$150/MWh. See the `--flex-sweep` figures. Premium AI ($900/MWh) sheds nothing and stays firm.

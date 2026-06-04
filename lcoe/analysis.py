@@ -279,7 +279,8 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
     wkw = dict(wind_solar_corr=sys.wind_solar_corr, syn_loading=sys.syn_loading,
                syn_persistence=sys.syn_persistence, cloud_ar1=sys.cloud_ar1,
                wind_ar1=sys.wind_ar1, wind_daily_share=sys.wind_daily_share,
-               wind_seasonal_amp=sys.wind_seasonal_amp)
+               wind_seasonal_amp=sys.wind_seasonal_amp, wind_v_ci=sys.wind_v_ci,
+               wind_v_rated=sys.wind_v_rated, wind_v_cutout=sys.wind_v_cutout)
     clearsky = solar_clearsky(cfg["mean_irr"])
     rng = np.random.default_rng(seed + 7)
 
@@ -392,7 +393,8 @@ def run_ldes_joint(region_key="eu", target_year=2035, ldes_tech="h2",
             wind_solar_corr=sysp.wind_solar_corr, syn_loading=sysp.syn_loading,
             syn_persistence=sysp.syn_persistence, cloud_ar1=sysp.cloud_ar1,
             wind_ar1=sysp.wind_ar1, wind_daily_share=sysp.wind_daily_share,
-            wind_seasonal_amp=sysp.wind_seasonal_amp)
+            wind_seasonal_amp=sysp.wind_seasonal_amp, wind_v_ci=sysp.wind_v_ci,
+            wind_v_rated=sysp.wind_v_rated, wind_v_cutout=sysp.wind_v_cutout)
         sols.append(s); wins.append(w)
     sol2d = np.array(sols); win2d = np.array(wins)
     CF_sol = float(sol2d.mean()); CF_win = float(win2d.mean())

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Off-grid datacenter LCOE model (v5.4) — package API.
+"""Off-grid datacenter LCOE model (v5.5) — package API.
 
 The implementation is split across focused modules (params, costs, weather,
 dispatch, optimize, reporting, plots, simulate, analysis, cli). This re-exports

@@ -17,7 +17,10 @@ env/
 .claude/
 
 # Note: figs/, output/, and scratch/ ARE tracked on purpose — the README and
-# model_documentation.md reference the generated figures and scratch/v53_run.log.
+# model_documentation.md reference the generated figures and the output/*_results.json
+# export (the doc tables are regenerated from it via tools/regen_doc_tables.py).
 
-# Ad-hoc CLI / sweep figures (regenerate on demand; keep only the canonical suite)
+# Ad-hoc CLI / sweep figures and outputs (regenerate on demand; keep only the
+# canonical us_firm / eu_firm suite tracked)
 figs/cli_*
+output/cli_*

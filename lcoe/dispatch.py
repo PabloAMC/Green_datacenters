@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """Vectorised chronological dispatch over the 3D scenario grid."""
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -33,12 +33,22 @@ class ChronologicalSimulator:
 
     def __init__(self, sys: SystemParams, batt: BatteryParams,
                  workload: WorkloadProfile, mean_irr: float,
-                 mean_wind_ms: float, seed: int = 0):
+                 mean_wind_ms: float, seed: int = 0,
+                 weather_years: "Optional[list]" = None):
         self.sys       = sys
         self.batt      = batt
         self.workload  = workload
         self.clearsky  = solar_clearsky(mean_irr)
         self.mean_wind = mean_wind_ms
+        # REANALYSIS HOOK (v5.5). `weather_years`, if given, is an explicit list of
+        # (solar_cf[8760], wind_cf[8760]) hourly traces — e.g. real ERA5 / NSRDB years
+        # loaded via `weather.load_weather_traces` — used INSTEAD of the synthetic
+        # generator. This is the single seam to swap stylised weather for measured
+        # reanalysis: the dispatch, optimiser, costing and figures are unchanged; only
+        # the source of the 8760-h CF traces differs. n_mc_weather is then ignored (the
+        # supplied set is used as-is). None → synthesise from the marginals + synoptic
+        # factor as before.
+        self.weather_years = weather_years
 
         ns = sys.grid_steps   # per-axis; total scenarios = ns^3
         self.C_sol_grid = np.linspace(0.0, sys.c_sol_max, ns)
@@ -138,7 +148,8 @@ class ChronologicalSimulator:
 
     def _run_mc(self, seed: int):
         rng = np.random.default_rng(seed)
-        N   = self.sys.n_mc_weather
+        # Real reanalysis traces (if supplied) are used as-is; otherwise synthesise N.
+        N   = len(self.weather_years) if self.weather_years is not None else self.sys.n_mc_weather
         sh  = (len(self._cs),)
 
         all_gas = np.zeros((N,) + sh)
@@ -149,15 +160,21 @@ class ChronologicalSimulator:
         cf_s_list, cf_w_list = [], []
 
         for i in range(N):
-            sol_tr, win_tr = generate_weather_year(
-                self.clearsky, self.mean_wind, rng,
-                wind_solar_corr=self.sys.wind_solar_corr,
-                syn_loading=self.sys.syn_loading,
-                syn_persistence=self.sys.syn_persistence,
-                cloud_ar1=self.sys.cloud_ar1,
-                wind_ar1=self.sys.wind_ar1,
-                wind_daily_share=self.sys.wind_daily_share,
-                wind_seasonal_amp=self.sys.wind_seasonal_amp)
+            if self.weather_years is not None:
+                sol_tr, win_tr = self.weather_years[i]
+                sol_tr = np.asarray(sol_tr, float); win_tr = np.asarray(win_tr, float)
+            else:
+                sol_tr, win_tr = generate_weather_year(
+                    self.clearsky, self.mean_wind, rng,
+                    wind_solar_corr=self.sys.wind_solar_corr,
+                    syn_loading=self.sys.syn_loading,
+                    syn_persistence=self.sys.syn_persistence,
+                    cloud_ar1=self.sys.cloud_ar1,
+                    wind_ar1=self.sys.wind_ar1,
+                    wind_daily_share=self.sys.wind_daily_share,
+                    wind_seasonal_amp=self.sys.wind_seasonal_amp,
+                    wind_v_ci=self.sys.wind_v_ci, wind_v_rated=self.sys.wind_v_rated,
+                    wind_v_cutout=self.sys.wind_v_cutout)
             gas_f, fec_d, gas_p, gas_pf, drop_f, cf_s, cf_w = self._dispatch_one_year(sol_tr, win_tr)
             all_gas[i] = gas_f;  all_fec[i] = fec_d; all_gas_peak[i] = gas_p
             all_gas_peak_firm[i] = gas_pf; all_drop[i] = drop_f

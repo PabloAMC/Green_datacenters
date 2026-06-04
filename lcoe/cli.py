@@ -17,7 +17,7 @@ from .plots import (plot_flex_heatmap, plot_tornado, plot_ldes_joint,
 def build_arg_parser():
     import argparse
     p = argparse.ArgumentParser(
-        description="Off-grid datacenter LCOE model (v5.4). No args → firm US+EU suite.")
+        description="Off-grid datacenter LCOE model (v5.5). No args → firm US+EU suite.")
     p.add_argument("--region", choices=list(REGIONS), help="us | eu")
     p.add_argument("--workload", choices=list(WORKLOAD_PRESETS),
                    help="flexibility preset for a single-scenario run "

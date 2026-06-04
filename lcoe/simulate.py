@@ -43,6 +43,7 @@ def run_simulation(
     grid_ppa: Optional[GridPPAParams] = None,
     design_p90: bool        = False,
     h2_system: bool         = False,
+    weather_years: Optional[list] = None,
 ) -> Dict:
     if reliabilities is None:
         reliabilities = [0.80, 0.90, 0.95]
@@ -64,7 +65,8 @@ def run_simulation(
     lcoe_smr       = smr_trajectory(smr, years)
     gas_pure       = np.array([gas_pure_lcoe(gas, i, gas.wacc) for i in range(years + 1)])
 
-    sim      = ChronologicalSimulator(sys, battery, workload, mean_irr, mean_wind_ms, seed)
+    sim      = ChronologicalSimulator(sys, battery, workload, mean_irr, mean_wind_ms, seed,
+                                      weather_years=weather_years)
     rng_cost = np.random.default_rng(seed + 1)
 
     results = {

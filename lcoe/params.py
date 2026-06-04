@@ -205,6 +205,12 @@ class SystemParams:
     wind_ar1: float = 0.75         # ρ_w: hourly wind AR(1) within-day persistence (~4h memory)
     wind_daily_share: float = 0.50 # a_w²: share of wind variance at the daily/synoptic scale
     wind_seasonal_amp: float = 0.12  # winter wind amplification amplitude
+    # IEC power-curve speeds (m/s). v5.5: rated lowered 13→11 (cut-in 3.5→3.0) for a
+    # modern low-specific-power turbine, so the simulated wind CF (~0.33 US / 0.28 EU)
+    # matches the onshore-CF basis (0.30–0.55) of the Lazard wind LCOE the model imports.
+    wind_v_ci: float = 3.0
+    wind_v_rated: float = 11.0
+    wind_v_cutout: float = 25.0
 
 
 # ── Workload presets ──────────────────────────────────────────────────────────
@@ -237,6 +243,15 @@ WORKLOAD_PRESETS = {
 
 # ── Technology defaults ───────────────────────────────────────────────────────
 
+# CF-CONSISTENCY (v5.5). `lcoe_today` is the Lazard LCOE+ v18 mid-range, which is
+# levelised at Lazard's own capacity-factor assumptions (utility solar 20–30%,
+# onshore wind 30–55%). An LCOE is capex+FOM spread over a *specific* CF, so the
+# dispatch must simulate that same CF or the cost basis is internally inconsistent.
+# The default resource + weather (after the v5.5 solar cloud-double-count fix and the
+# modern wind power curve) reproduce US solar ≈0.23 / wind ≈0.33 and EU solar ≈0.16 /
+# wind ≈0.28 — inside Lazard's CF bands — so the imported $/MWh and the simulated MWh
+# now refer to the same plant. (Pre-v5.5 the dispatch ran at ~0.15/0.22, ~½ the CF the
+# LCOE assumed, overstating overbuild and biasing high-RE cost upward.)
 SOLAR = TechParams("Solar PV", lcoe_today=52.0, learning_rate=0.30,
                    cumulative_gw_2025=2900.0, annual_additions_gw=650.0,
                    additions_growth_rate=0.15, om_frac_lcoe=0.15)
@@ -386,12 +401,12 @@ FIRMING_PRESETS = {"gas": None, "h2": GAS_H2}   # None → region default gas
 
 
 # Resource-quality presets: (mean_irr [kWh/m²/day], mean_wind_ms). "default" is the
-# conservative average-site resource used for the headline suite; "good" represents a
-# modern, well-sited plant (higher irradiance, high-hub-height / low-specific-power
-# turbines on a strong wind resource). Raising these lifts the simulated capacity
-# factors toward real-world fleets and shows how much sooner RE reaches parity. Note
-# the solar CF stays moderate even at "good" because the Beta(3,1.5) cloud model is
-# conservative; the larger mover is wind. Used by `run_resource_sensitivity` / --resource.
+# average-site resource used for the headline suite; "good" represents a modern,
+# well-sited plant (higher irradiance, high-hub-height / low-specific-power turbines on
+# a strong wind resource). With the v5.5 CF recalibration the *default* already sits in
+# Lazard's CF bands — US solar ≈0.23 / wind ≈0.33, EU solar ≈0.16 / wind ≈0.28 — so it
+# is no longer artificially pessimistic; "good" pushes toward the top of those bands
+# (US ≈0.26 / 0.45, EU ≈0.19 / 0.41). Used by `run_resource_sensitivity` / --resource.
 RESOURCE_PRESETS = {
     "us": {"default": (5.5, 7.5), "good": (6.8, 9.0)},
     "eu": {"default": (3.8, 7.0), "good": (4.6, 8.5)},
