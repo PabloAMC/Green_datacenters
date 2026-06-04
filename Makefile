@@ -11,6 +11,7 @@ help:
 	@echo "  test          run the regression + unit suite"
 	@echo "  reproduce     regenerate all figures + output/ JSON/CSV from scratch (firm suite)"
 	@echo "  tables        print the §11 doc tables from output/ (paste-ready)"
+	@echo "  locations     compute the cross-location comparison figure (EU countries / US states)"
 	@echo "  report        build the GitHub Pages site (docs/index.html) from output/ + figs"
 	@echo "  check-docs    fail if the committed doc tables drift from output/"
 	@echo "  check         test + check-docs (what CI runs)"
@@ -30,6 +31,9 @@ reproduce:
 
 tables:
 	$(PYTHON) tools/regen_doc_tables.py
+
+locations:
+	$(PYTHON) tools/build_locations.py
 
 report:
 	$(PYTHON) tools/build_report.py

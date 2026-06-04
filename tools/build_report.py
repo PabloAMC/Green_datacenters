@@ -116,6 +116,45 @@ def findings(us, eu):
     return "".join(f"<li>{x}</li>" for x in items)
 
 
+def locations_section():
+    """The optional 'across geographies' section (figs/locations_fig1.png +
+    output/locations_results.json from tools/build_locations.py). Empty if not built."""
+    path = os.path.join(ROOT, "output", "locations_results.json")
+    fig = _img("locations_fig1.png")
+    if not fig or not os.path.exists(path):
+        return ""
+    with open(path) as fh:
+        data = json.load(fh)
+    rows = "".join(
+        f"<tr><th>{l['label']}</th><td>{'Europe' if l['region']=='eu' else 'US'}</td>"
+        f"<td>{l['irr']:.1f}</td><td>{l['wind']:.1f}</td>"
+        f"<td>{l['cf_solar']:.2f}</td><td>{l['cf_wind']:.2f}</td></tr>"
+        for l in data["locations"])
+    table = ("<table><thead><tr><th>Location</th><th>Region</th>"
+             "<th>Sun (kWh/m²/day)</th><th>Wind (m/s)</th><th>Solar CF</th><th>Wind CF</th>"
+             f"</tr></thead><tbody>{rows}</tbody></table>")
+    re_pct = f"{data['re_target']:.0%}"
+    return (
+        '<h2>Across geographies</h2>'
+        f'<p>The same firm off-grid build at a <b>{re_pct}-renewable</b> target, computed for '
+        'several large EU countries and US states. Within a region only the renewable '
+        '<b>resource</b> differs (gas price, carbon price and technology costs are the region '
+        'default), so this isolates how much <b>where you build</b> moves the cost. The '
+        'non-obvious result: for a <b>firm, always-on</b> load the <b>wind</b> resource matters '
+        'more than the sun — solar is diurnal and needs storage to run through the night — so '
+        '<b>wind-rich sites (United Kingdom, Texas, Iowa) come out cheapest</b>, sun-rich but '
+        'calmer ones (Spain, Arizona) are pricier, and sites poor in both (Virginia) dearest.</p>'
+        '<div class="caveat">These per-location resources are <b>approximate, representative</b> '
+        'values (PVGIS / NSRDB order-of-magnitude), <b>not fetched site measurements</b>, and '
+        'this runs at reduced optimiser fidelity. Read the spread as <b>directional</b>, not '
+        'site-precise; feed real ERA5/NSRDB weather (<code>--weather</code>) to make any '
+        'location exact.</div>'
+        '<figure style="margin:1em 0;background:#fff;border:1px solid var(--line);'
+        f'border-radius:8px;padding:10px"><img src="{fig}" style="width:100%" '
+        'alt="off-grid datacenter cost by location"></figure>'
+        f'{table}')
+
+
 def assumptions_table(us, eu):
     uc, ec = us["simulated_cf"], eu["simulated_cf"]
     rows = [
@@ -226,6 +265,8 @@ first year the build's delivered cost drops below the gas baseline.</p>
    high-renewable optimum is wind-heavy to ride out multi-day lulls.</figcaption></figure>
 </div>
 
+{locations_section}
+
 <h2>Key assumptions</h2>
 {assumptions}
 <p class="sub" style="font-size:13.5px">All in real 2025 USD. Costs fall over time via
@@ -263,6 +304,7 @@ def main():
         fig3_us=_img("us_firm_fig3_optimal_mix.png"),
         fig3_eu=_img("eu_firm_fig3_optimal_mix.png"),
         assumptions=assumptions_table(us, eu),
+        locations_section=locations_section(),
         version=MODEL_VERSION,
         commit=prov.get("git_commit", "—"),
         cfg=prov.get("config_sha256", "—"),
