@@ -225,7 +225,7 @@ Tables regenerable via `tools/regen_doc_tables.py` from `output/*_results.json`.
 
 ### US — 90% RE
 
-* **2025 LCOE:** $126.4/MWh; **2040:** $62.4/MWh. **Parity (90% RE): >2040.** But **70–80% RE reach parity ~2036–37**, and **85% ~2040**, as the CF-consistent build needs less overbuild.
+* **2025 LCOE:** $126.4/MWh; **2040:** $62.4/MWh. **Parity (90% RE): >2040.** But **70–80% RE reach parity ~2036**, and **85% ~2040**, as the CF-consistent build needs less overbuild.
 * *Why?* Extremely cheap, untaxed US gas (~$46/MWh even at a 9% WACC) is a moat clean energy still can't cross within the horizon at *high* RE fractions, where heavy wind overbuild is needed for multi-day lulls.
 
 ### Europe — 90% RE

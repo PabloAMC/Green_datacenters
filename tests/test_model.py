@@ -696,6 +696,24 @@ def test_resource_band_brackets_central():
     assert lo - 1.0 <= c <= hi + 1.0                         # central inside (grid-noise tol)
 
 
+def test_re_monotonicity_enforced():
+    """Optimal delivered cost must be non-decreasing in the renewable target (a looser
+    target can always reuse a tighter target's build), so a looser target can never come
+    out more expensive. _enforce_re_monotonicity repairs optimiser/grid noise that violates
+    this (the cause of the nonsensical US '80% crosses gas before 70%')."""
+    import numpy as np
+    from lcoe.simulate import _enforce_re_monotonicity
+    res = {"scenarios": {
+        0.70: {"opt_delivered": np.array([50., 49., 48.]), "opt_csol": np.array([2., 2., 2.])},
+        0.80: {"opt_delivered": np.array([51., 48., 49.]), "opt_csol": np.array([3., 3., 3.])}}}
+    _enforce_re_monotonicity(res, [0.70, 0.80], years=2)
+    a, b = res["scenarios"][0.70]["opt_delivered"], res["scenarios"][0.80]["opt_delivered"]
+    assert all(a[i] <= b[i] + 1e-9 for i in range(3))    # non-decreasing in the target
+    assert list(a) == [50., 48., 48.]                    # adopts the cheaper feasible slice
+    assert res["scenarios"][0.70]["opt_csol"][1] == 3.0  # ...and its build, only where needed
+    assert res["scenarios"][0.70]["opt_csol"][0] == 2.0  # untouched where already monotone
+
+
 # ── runner ────────────────────────────────────────────────────────────────────
 
 def _run_all():

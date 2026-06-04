@@ -3,7 +3,7 @@
   "workload": "Firm",
   "provenance": {
     "model_version": "5.6.0",
-    "git_commit": "72482a1",
+    "git_commit": "0b5af34",
     "weather_source": "synthetic",
     "n_weather_years": 50,
     "seed": 42,

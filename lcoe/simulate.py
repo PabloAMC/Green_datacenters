@@ -254,7 +254,34 @@ def run_simulation(
             results["h2_system"]["lcoe_reslo"] = h2b.min(0)
             results["h2_system"]["lcoe_reshi"] = h2b.max(0)
 
+    _enforce_re_monotonicity(results, reliabilities, years)
     return results
+
+
+def _enforce_re_monotonicity(results, reliabilities, years):
+    """The optimal delivered cost MUST be non-decreasing in the renewable target R: a
+    looser target's feasible set contains a tighter one's, so the looser optimum can always
+    reuse the tighter build and cost no more. In the very flat US cost valley the multi-start
+    Nelder–Mead occasionally lands the looser problem on a slightly worse grid node than the
+    tighter one (e.g. US 70% came out ~$0.2-1.2/MWh *above* 80% in 2034-36), which would draw
+    economically-impossible crossings. Repair it the only way that is provably correct: in any
+    (year, R) where a looser target costs more than a tighter one, adopt the tighter target's
+    cheaper, still-feasible slice wholesale (cost, build, splits, and bands stay consistent)."""
+    Rs = sorted(results["scenarios"])
+    if len(Rs) < 2:
+        return
+    keys = [k for k, v in results["scenarios"][Rs[0]].items()
+            if isinstance(v, np.ndarray) and v.shape == (years + 1,)]
+    for i in range(years + 1):
+        src = Rs[-1]                                   # tightest target = upper bound on cost
+        for R in reversed(Rs[:-1]):                    # next-tightest down to loosest
+            sc = results["scenarios"][R]
+            if sc["opt_delivered"][i] <= results["scenarios"][src]["opt_delivered"][i] + 1e-9:
+                src = R                                # genuinely (weakly) cheaper — new bound
+            else:
+                bsc = results["scenarios"][src]        # violation → adopt the tighter slice
+                for k in keys:
+                    sc[k][i] = bsc[k][i]
 
 
 def _nearest_re(results, target: float) -> float:

@@ -125,7 +125,7 @@ US, 0.18→**0.29** EU; §4.4–4.5). The US CFs and EU wind now sit inside Laza
 EU solar (0.158) sits just below the US band, consistent with its weaker irradiance and its
 own EU-specific LCOE basis (§4.2). Net: high-RE
 delivered LCOE falls ~20–30% and parity moves earlier — **EU 90% RE ≈ 2029;
-US 70–80% ≈ 2036–37, 85% ≈ 2040** (high-RE US still does not beat cheap gas in the horizon). A
+US 70–80% ≈ 2036, 85% ≈ 2040** (high-RE US still does not beat cheap gas in the horizon). A
 **reanalysis hook** (`ChronologicalSimulator(weather_years=…)` / `weather.load_weather_traces`)
 lets real ERA5/NSRDB years drive the dispatch unchanged. Tables below are regenerated
 against this baseline.
@@ -1180,7 +1180,7 @@ numbers for any valuable datacenter. (Tables regenerated from the export via
 
 | RE target | 2025 ($/MWh) | 2030 | 2035 | 2040 | vs gas 2025 | Crossover |
 |-----------|-------------|------|------|------|-------------|-----------|
-| 70% | 73.9 | 58.5 | 49.3 | 40.4 | +61% | ~2037 |
+| 70% | 73.9 | 58.5 | 48.6 | 40.4 | +61% | ~2036 |
 | 80% | 83.4 | 60.9 | 48.6 | 40.5 | +81% | ~2036 |
 | 85% | 92.3 | 68.4 | 55.1 | 45.6 | +100% | ~2040 |
 | 90% | 126.4 | 94.7 | 75.3 | 62.4 | +174% | >2040 |
@@ -1189,7 +1189,7 @@ numbers for any valuable datacenter. (Tables regenerated from the export via
 High-RE US still never beats gas within the horizon — cheap untaxed gas ($4/MMBtu → ~$46/MWh
 even at a 9% WACC) is a very low baseline, and high-RE needs heavy wind overbuild to ride out
 multi-day lulls. With the v5.5 CF-consistent resource the moderate-RE builds need less
-overbuild, so **70–80% RE now reach parity ~2036–37 and 85% ~2040**; 90% remains >2040.
+overbuild, so **70–80% RE now reach parity ~2036 and 85% ~2040**; 90% remains >2040.
 
 **95% RE is omitted: it is infeasible for a firm, battery-only off-grid system.** Over the
 whole 21³ build grid the maximum achievable annual RE fraction is ≈**0.94 (EU)** / ≈**0.95 (US)**:
