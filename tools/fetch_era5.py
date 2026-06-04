@@ -72,37 +72,60 @@ def _to_8760(arr, months, days):
     return arr
 
 
-def fetch_year(client, lat, lon, year, pad):
+def _open(fn):
+    """Open a monthly ERA5 download as one dataset. The new CDS may return a zip with the
+    instantaneous (wind) and accumulated (solar) variables in separate NetCDFs — merge them."""
     import xarray as xr
-    fn = f"/tmp/era5_{lat}_{lon}_{year}.nc"
-    if not os.path.exists(fn):
-        print(f"  [{year}] requesting ERA5 (this can queue for minutes on the CDS) …")
-        client.retrieve("reanalysis-era5-single-levels", {
-            "product_type": "reanalysis",
-            "variable": ["surface_solar_radiation_downwards",
-                         "100m_u_component_of_wind", "100m_v_component_of_wind"],
-            "year": str(year),
-            "month": [f"{m:02d}" for m in range(1, 13)],
-            "day": [f"{d:02d}" for d in range(1, 32)],
-            "time": [f"{h:02d}:00" for h in range(24)],
-            "area": [lat + pad, lon - pad, lat - pad, lon + pad],   # N, W, S, E
-            "data_format": "netcdf",
-            "download_format": "unarchived",
-        }, fn)
-    ds = xr.open_dataset(fn)
-    # nearest grid point to the requested coordinate
+    import zipfile
+    import tempfile
+    if not zipfile.is_zipfile(fn):
+        return xr.open_dataset(fn)
+    with zipfile.ZipFile(fn) as zf:
+        d = tempfile.mkdtemp()
+        ncs = [zf.extract(n, d) for n in zf.namelist() if n.endswith(".nc")]
+    return xr.merge([xr.open_dataset(p) for p in ncs], compat="override", join="override")
+
+
+def _read_point(fn, lat, lon):
+    """Open a monthly ERA5 download, pick the nearest grid point → arrays."""
+    ds = _open(fn)
     latname = "latitude" if "latitude" in ds.coords else "lat"
     lonname = "longitude" if "longitude" in ds.coords else "lon"
-    ds = ds.sel({latname: lat, lonname: lon}, method="nearest")
+    if latname in ds.dims or lonname in ds.dims:
+        ds = ds.sel({latname: lat, lonname: lon}, method="nearest")
     tname = "valid_time" if "valid_time" in ds.coords else "time"
     t = ds[tname].dt
     months, days = t.month.values, t.day.values
-    ssrd = ds["ssrd"].values
+    ghi = np.clip(ds["ssrd"].values, 0, None) / 3600.0          # J/m² → W/m²
     u = ds[("u100" if "u100" in ds else "100m_u_component_of_wind")].values
     v = ds[("v100" if "v100" in ds else "100m_v_component_of_wind")].values
     ds.close()
-    ghi = np.clip(ssrd, 0, None) / 3600.0                      # J/m² → W/m²
     return months, days, ghi, np.sqrt(u ** 2 + v ** 2)
+
+
+def fetch_year(client, lat, lon, year, pad):
+    """Fetch ERA5 a MONTH at a time (the new CDS caps per-request size) and stitch the
+    full year together in calendar order."""
+    M, D, G, S = [], [], [], []
+    for month in range(1, 13):
+        fn = f"/tmp/era5_{lat}_{lon}_{year}_{month:02d}.nc"
+        if not os.path.exists(fn):
+            print(f"  [{year}-{month:02d}] requesting ERA5 (can queue on the CDS) …")
+            client.retrieve("reanalysis-era5-single-levels", {
+                "product_type": "reanalysis",
+                "variable": ["surface_solar_radiation_downwards",
+                             "100m_u_component_of_wind", "100m_v_component_of_wind"],
+                "year": str(year), "month": f"{month:02d}",
+                "day": [f"{d:02d}" for d in range(1, 32)],
+                "time": [f"{h:02d}:00" for h in range(24)],
+                "area": [lat + pad, lon - pad, lat - pad, lon + pad],   # N, W, S, E
+                "data_format": "netcdf",
+                "download_format": "unarchived",
+            }, fn)
+        mo, da, gh, sp = _read_point(fn, lat, lon)
+        M.append(mo); D.append(da); G.append(gh); S.append(sp)
+    return (np.concatenate(M), np.concatenate(D),
+            np.concatenate(G), np.concatenate(S))
 
 
 def main(argv=None):
