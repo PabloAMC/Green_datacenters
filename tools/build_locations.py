@@ -51,6 +51,7 @@ LOCATIONS = [
     ("Arizona",        "us", 6.3, 5.8, "arizona",  33.4, -112.0),
     ("Iowa",           "us", 4.3, 8.3, "iowa",     42.0,  -93.5),
     ("Virginia",       "us", 4.5, 5.8, "virginia", 39.0,  -77.5),
+    ("Wyoming",        "us", 5.2, 9.0, "wyoming",  41.8, -107.2),
 ]
 
 # Distinct, print-safe colours (Okabe–Ito + extras), one per location within a panel.
@@ -63,8 +64,12 @@ def run_location(label, region, irr, wind, slug, lat, lon,
     reg = REGIONS[region]
     sysp = _sys_with(reg["sys"], grid_steps=grid_steps, n_mc_weather=n_mc)
     weather_years = None
+    wyears = []
     if real:                                   # drive the dispatch with real ERA5 years
-        weather_years = load_weather_traces(os.path.join(ROOT, "output", "era5", f"{slug}.npz"))
+        npz = os.path.join(ROOT, "output", "era5", f"{slug}.npz")
+        weather_years = load_weather_traces(npz)
+        with np.load(npz) as d:
+            wyears = [int(y) for y in d["years"]]
     r = run_simulation(solar=reg["solar"], wind=reg["wind"], battery=reg["battery"],
                        gas=reg["gas"], smr=reg["smr"], sys=sysp, workload=FIRM,
                        mean_irr=irr, mean_wind_ms=wind, years=years,
@@ -72,7 +77,7 @@ def run_location(label, region, irr, wind, slug, lat, lon,
                        weather_years=weather_years)
     sc = r["scenarios"][RE_TARGET]
     return {"label": label, "region": region, "irr": irr, "wind": wind,
-            "lat": lat, "lon": lon,
+            "lat": lat, "lon": lon, "weather_years": wyears,
             "years": [int(y) for y in r["years"]],
             "delivered": [round(float(v), 2) for v in sc["opt_delivered"]],
             "gas_pure": [round(float(v), 2) for v in r["gas_pure"]],
@@ -98,7 +103,9 @@ def build_figure(results, real=False):
         ax.legend(fontsize=8.5, frameon=True, facecolor="white", framealpha=1)
         ax.grid(alpha=0.3)
     axes[0].set_ylabel("Delivered cost ($/MWh of load)")
-    src = ("real ERA5 weather, 2019–2021" if real else "illustrative resource")
+    yrs = sorted({y for r in results for y in r.get("weather_years", [])})
+    span = f"{yrs[0]}–{yrs[-1]}" if yrs else "?"
+    src = (f"real ERA5 weather, {span}" if real else "illustrative resource")
     fig.suptitle(f"Off-grid datacenter cost at {RE_TARGET:.0%} renewable, by location "
                  f"(firm / always-on · {src})", fontsize=13)
     fig.tight_layout()
@@ -117,9 +124,12 @@ def main(argv=None):
     suffix = "_real" if real else ""
     figpath = os.path.join(ROOT, "figs", f"locations_fig1{suffix}.png")
     fig.savefig(figpath, dpi=200, bbox_inches="tight"); plt.close(fig)
+    yrs = sorted({y for r in results for y in r.get("weather_years", [])})
+    span = f"{yrs[0]}-{yrs[-1]}" if yrs else "?"
     payload = {"model_version": MODEL_VERSION, "git_commit": git_commit(),
                "re_target": RE_TARGET,
-               "note": ("real ERA5 2019-2021 (solar from horizontal GHI×1.25); region-default "
+               "weather_span": span if real else None,
+               "note": (f"real ERA5 {span} (solar from horizontal GHI×1.25); region-default "
                         "gas/carbon" if real else
                         "illustrative resource; region-default gas/carbon"),
                "locations": results}

@@ -82,9 +82,15 @@ def _optimize(ctx, prev_x=None):
 
 
 def h2_system_trajectory(solar, wind, battery, mean_irr, mean_wind_ms, sys, years,
-                         seed=42, ldes_tech="h2", n_mc=6):
+                         seed=42, ldes_tech="h2", n_mc=6, weather_years=None):
     """Per-year optimum of the gas-free H₂ system → trajectory + cost breakdown
-    (year-indexed arrays of delivered LCOE, build, and the fig6 capex/opex bands)."""
+    (year-indexed arrays of delivered LCOE, build, and the fig6 capex/opex bands).
+
+    `weather_years`: optional list of (solar_cf[8760], wind_cf[8760]) real reanalysis
+    years (e.g. from `weather.load_weather_traces`). When given, the dispatch ensemble is
+    these real years INSTEAD of the synthetic generator — so the H₂/storage sizing sees
+    real cloud/Dunkelflaute structure and real interannual variability. `mean_irr` /
+    `mean_wind_ms` / `n_mc` are then ignored for the weather draw."""
     batt = battery
     ldes = LDES_PRESETS[ldes_tech]
     n = sys.project_lifetime_yr
@@ -102,18 +108,22 @@ def h2_system_trajectory(solar, wind, battery, mean_irr, mean_wind_ms, sys, year
     h2_buy_base = GAS_H2.gas_price_mmbtu * GAS_H2.ccgt_heat_rate + GAS_H2.vom_mwh
     crf_l = crf(ldes.wacc, n); annuity = (1.0 - (1.0 + ldes.wacc) ** (-n)) / ldes.wacc
 
-    rng = np.random.default_rng(seed + 5)
-    cs = solar_clearsky(mean_irr)
-    sol2d = np.empty((n_mc, 8760)); win2d = np.empty((n_mc, 8760))
-    for k in range(n_mc):
-        s, w = generate_weather_year(
-            cs, mean_wind_ms, rng, wind_solar_corr=sys.wind_solar_corr,
-            syn_loading=sys.syn_loading, syn_persistence=sys.syn_persistence,
-            cloud_ar1=sys.cloud_ar1, wind_ar1=sys.wind_ar1,
-            wind_daily_share=sys.wind_daily_share, wind_seasonal_amp=sys.wind_seasonal_amp,
-            wind_v_ci=sys.wind_v_ci, wind_v_rated=sys.wind_v_rated,
-            wind_v_cutout=sys.wind_v_cutout)
-        sol2d[k] = s; win2d[k] = w
+    if weather_years is not None:
+        sol2d = np.asarray([np.asarray(s, float) for s, _ in weather_years])
+        win2d = np.asarray([np.asarray(w, float) for _, w in weather_years])
+    else:
+        rng = np.random.default_rng(seed + 5)
+        cs = solar_clearsky(mean_irr)
+        sol2d = np.empty((n_mc, 8760)); win2d = np.empty((n_mc, 8760))
+        for k in range(n_mc):
+            s, w = generate_weather_year(
+                cs, mean_wind_ms, rng, wind_solar_corr=sys.wind_solar_corr,
+                syn_loading=sys.syn_loading, syn_persistence=sys.syn_persistence,
+                cloud_ar1=sys.cloud_ar1, wind_ar1=sys.wind_ar1,
+                wind_daily_share=sys.wind_daily_share, wind_seasonal_amp=sys.wind_seasonal_amp,
+                wind_v_ci=sys.wind_v_ci, wind_v_rated=sys.wind_v_rated,
+                wind_v_cutout=sys.wind_v_cutout)
+            sol2d[k] = s; win2d[k] = w
     CF_sol, CF_win = float(sol2d.mean()), float(win2d.mean())
 
     out = {c: np.zeros(years + 1) for c in COMP}

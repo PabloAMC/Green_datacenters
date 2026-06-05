@@ -38,6 +38,15 @@ locations:
 locations-real:   ## needs output/era5/*.npz (tools/fetch_era5.py) + a CDS key
 	$(PYTHON) tools/build_locations.py --real
 
+fetch-locations:  ## (re)download real ERA5 weather for all locations (2015-2025); needs a CDS key
+	$(PYTHON) tools/fetch_locations.py
+
+locations-h2:     ## per-state fig1: self-made-H2 zero-carbon, no-wind vs with-wind; needs output/era5/*.npz
+	$(PYTHON) tools/build_locations_h2.py
+
+locations-re:     ## per-state fig1: gas-backed ~55% (no wind) vs ~80% (with wind); needs output/era5/*.npz
+	$(PYTHON) tools/build_locations_re.py
+
 solar-only:
 	$(PYTHON) tools/build_solar_only.py
 

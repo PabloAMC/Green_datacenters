@@ -123,59 +123,101 @@ def _fig_box(img):
 
 
 def locations_section():
-    """The 'across geographies' section: an illustrative figure and (if fetched) a real-ERA5
-    figure, from tools/build_locations.py. Empty blocks are skipped."""
+    """The 'across geographies' section — the firm build computed per large EU country / US
+    state on REAL ERA5 weather, as two per-state comparisons: a gas-backed renewable-target
+    build (no-wind ~55% vs with-wind ~80%, from tools/build_locations_re.py) and a fully
+    zero-carbon self-made-hydrogen build (no-wind vs with-wind, from build_locations_h2.py).
+    Each is a vertical 5×2 grid of per-state panels. Empty blocks are skipped."""
     out = []
-    # ── Illustrative ────────────────────────────────────────────────────────────
-    ip = os.path.join(ROOT, "output", "locations_results.json")
-    ifig = _img("locations_fig1.png")
-    if ifig and os.path.exists(ip):
-        d = json.load(open(ip)); re_pct = f"{d['re_target']:.0%}"
-        rows = "".join(
-            f"<tr><th>{l['label']}</th><td>{'Europe' if l['region']=='eu' else 'US'}</td>"
-            f"<td>{l['irr']:.1f}</td><td>{l['wind']:.1f}</td>"
-            f"<td>{l['cf_solar']:.2f}</td><td>{l['cf_wind']:.2f}</td></tr>" for l in d["locations"])
+    intro_done = False
+
+    # ── Gas-backed, renewable target: ~55% no-wind vs ~80% with-wind ──────────────
+    rep = os.path.join(ROOT, "output", "locations_re_results.json")
+    refig = _img("locations_re_grid.png")
+    if refig and os.path.exists(rep):
+        d = json.load(open(rep))
+        span = d.get("weather", "real ERA5")
+        yspan = span.replace("real ERA5", "").strip() or span
+        nyears = len({y for x in d["locations"] for y in x.get("weather_years", [])}) or 11
+
+        def rrow(x):
+            return (f"<tr><th>{x['label']}</th><td>{'Europe' if x['region']=='eu' else 'US'}</td>"
+                    f"<td>{x['cf_solar']:.2f}</td><td>{x['cf_wind']:.2f}</td>"
+                    f"<td>{x['target_nowind']:.0%} · ${x['delivered_nowind'][10]:.0f}</td>"
+                    f"<td>{x['target_wind']:.0%} · ${x['delivered_wind'][10]:.0f}</td></tr>")
+        rows = "".join(rrow(x) for x in
+                       sorted(d["locations"], key=lambda x: (x["region"], x["delivered_wind"][10])))
         out.append(
             '<h2>Across geographies</h2>'
-            f'<p>The same firm off-grid build at a <b>{re_pct}-renewable</b> target, computed for '
-            'several large EU countries and US states. Within a region only the renewable '
-            '<b>resource</b> differs (gas, carbon and technology costs are the region default), so '
-            'this isolates how much <b>where you build</b> moves the cost. The non-obvious result: '
-            'for a <b>firm, always-on</b> load the <b>wind</b> resource matters more than the sun — '
-            'solar is diurnal and needs storage to run overnight — so <b>wind-rich sites (United '
-            'Kingdom, Texas, Iowa) come out cheapest</b>, sun-rich but calmer ones (Spain, Arizona) '
-            'are pricier, and sites poor in both (Virginia) dearest.</p>'
-            '<div class="caveat">This first figure uses <b>illustrative, representative</b> '
-            'resource values (not site measurements). The figure below it uses <b>real ERA5 '
-            'weather</b> to make each location exact.</div>'
-            + _fig_box(ifig)
-            + "<table><thead><tr><th>Location</th><th>Region</th><th>Sun (kWh/m²/day)</th>"
-              "<th>Wind (m/s)</th><th>Solar CF</th><th>Wind CF</th></tr></thead>"
-              f"<tbody>{rows}</tbody></table>")
-    # ── Real ERA5 ───────────────────────────────────────────────────────────────
-    rp = os.path.join(ROOT, "output", "locations_real_results.json")
-    rfig = _img("locations_fig1_real.png")
-    if rfig and os.path.exists(rp):
-        d = json.load(open(rp)); re_pct = f"{d['re_target']:.0%}"
-        rows = "".join(
-            f"<tr><th>{l['label']}</th><td>{'Europe' if l['region']=='eu' else 'US'}</td>"
-            f"<td>{l['lat']:.1f}, {l['lon']:.1f}</td>"
-            f"<td>{l['cf_solar']:.2f}</td><td>{l['cf_wind']:.2f}</td></tr>" for l in d["locations"])
+            '<p>The same firm off-grid build, now computed <b>at each of five large EU countries '
+            f'and five US states</b> on <b>real ERA5 reanalysis weather ({yspan}, {nyears} '
+            'years)</b> — one grid point per location, every real year a dispatch sample (so the '
+            'curves carry real interannual variability: dark/calm years included). Within a region '
+            'only the renewable <b>resource</b> differs — gas, carbon and technology costs are the '
+            'region default — so this isolates how much <b>where you build</b>, and <b>whether you '
+            'build a wind park</b>, move the cost.</p>'
+            '<h3>Gas-backed, at a renewable target: ~55% without wind vs ~80% with wind</h3>'
+            '<p>Solar panels are quick to permit; a wind park is a far bigger siting undertaking. '
+            'A solar + battery + gas system reaches about <b style="color:#b07900">55% renewable '
+            'comfortably without any wind</b>; adding a wind park lifts the same firm build to '
+            '<b style="color:#0072B2">~80%</b>. The grey dashed line is the region gas baseline; '
+            'the <b style="color:#8e44ad">purple dash-dot line is a small modular (nuclear) '
+            'reactor</b> — a firm, always-on reference that is never part of the optimisation. '
+            'The closer the two coloured lines, the less a wind park earns you there — so in the '
+            'calm, sunny Southwest (Arizona, which can\'t even reach 80% and is clamped to ~75%) '
+            'wind barely helps, while in the windy plains and a blustery United Kingdom it pays '
+            'off clearly. Note the regional contrast against firm nuclear: in the cheap-gas US the '
+            'renewable builds sit well below the reactor line, whereas in carbon-priced Europe the '
+            'reactor is competitive with — sometimes cheaper than — the high-renewable build.</p>'
+            + _fig_box(refig)
+            + "<table><thead><tr><th>State</th><th>Region</th><th>Solar CF</th><th>Wind CF</th>"
+              "<th>No wind · 2035</th><th>With wind · 2035</th></tr></thead>"
+              f"<tbody>{rows}</tbody></table>"
+            '<div class="caveat">Real hourly ERA5 at one point per location ('
+            f'{yspan}); solar capacity factor from horizontal irradiance ×1.25; region-default '
+            'gas, carbon and technology costs; reduced optimiser fidelity (directional to ~±15% '
+            'in level — the cross-site <i>ranking</i> and the <i>wind gap</i> are the robust '
+            'messages). Per-state figures are in <code>figs/locations_re/</code>.</div>')
+        intro_done = True
+
+    # ── Fully zero-carbon, self-made hydrogen: no-wind vs with-wind ───────────────
+    lp = os.path.join(ROOT, "output", "locations_h2_results.json")
+    lfig = _img("locations_h2_grid.png")
+    if lfig and os.path.exists(lp):
+        L = json.load(open(lp))
+        span = L.get("weather", "real ERA5")
+        yspan = span.replace("real ERA5", "").strip() or span
+
+        def hrow(x):
+            nw, w = x["lcoe_nowind"][10], x["lcoe_wind"][10]
+            return (f"<tr><th>{x['label']}</th><td>{'Europe' if x['region']=='eu' else 'US'}</td>"
+                    f"<td>{x['cf_solar']:.2f}</td><td>{x['cf_wind']:.2f}</td>"
+                    f"<td>${nw:.0f}</td><td>${w:.0f}</td><td>${nw - w:.0f}</td></tr>")
+        rows = "".join(hrow(x) for x in
+                       sorted(L["locations"], key=lambda x: (x["region"], x["lcoe_wind"][10])))
         out.append(
-            '<h3>… with real ERA5 weather</h3>'
-            f'<p>The same {re_pct}-renewable comparison, now driven by <b>measured ERA5 reanalysis '
-            'weather (2019–2021)</b> at one grid point per location — the resource is no longer '
-            'assumed. It confirms the headline (wind-rich UK / Texas / Iowa cheapest) and corrects '
-            'the guesses with real capacity factors (Northern Virginia\'s real wind, for instance, '
-            'is far weaker than the illustrative estimate).</p>'
-            '<div class="caveat">Real hourly ERA5 at one point per location, 3 years (fetched with '
-            '<code>tools/fetch_era5.py</code>). Solar capacity factor is from horizontal irradiance '
-            'scaled ×1.25 to approximate a tilted/tracked plant; gas, carbon and technology costs '
-            'are the region default; reduced optimiser fidelity.</div>'
-            + _fig_box(rfig)
-            + "<table><thead><tr><th>Location</th><th>Region</th><th>Lat, Lon</th>"
-              "<th>Solar CF</th><th>Wind CF</th></tr></thead>"
-              f"<tbody>{rows}</tbody></table>")
+            ('' if intro_done else '<h2>Across geographies</h2>')
+            + '<h3>Fully zero-carbon, self-made hydrogen: no wind vs with wind</h3>'
+            '<p>To drop gas entirely, replace the backstop with <b>green hydrogen made from '
+            'surplus renewables</b> (the small residual bought from the market). These two builds '
+            'are <b>zero-carbon by construction</b> — <b style="color:#b07900">solar + battery + '
+            'hydrogen (no wind)</b> and <b style="color:#0072B2">solar + wind + battery + '
+            f'hydrogen</b> — on the same {yspan} weather. Again the gap between the lines is what a '
+            'wind park buys: where wind is strong (Wyoming, Iowa, Texas; the United Kingdom) it '
+            'sits well below the no-wind line; where it is weak (Arizona, Virginia; Germany) the '
+            'two nearly coincide and the easier-to-permit no-wind build costs little extra. The '
+            'grey dashed line is the region gas baseline (it emits); the '
+            '<b style="color:#8e44ad">purple dash-dot line is a small modular (nuclear) '
+            'reactor</b> — the other firm zero-carbon option — which here is often competitive '
+            'with the hydrogen build, especially in carbon-priced Europe.</p>'
+            + _fig_box(lfig)
+            + "<table><thead><tr><th>State</th><th>Region</th><th>Solar CF</th><th>Wind CF</th>"
+              "<th>No-wind 2035</th><th>With-wind 2035</th><th>Wind saves</th></tr></thead>"
+              f"<tbody>{rows}</tbody></table>"
+            '<div class="caveat">Real hourly ERA5 at one point per location ('
+            f'{yspan}); solar capacity factor from horizontal irradiance ×1.25; region-default '
+            'carbon and technology costs; reduced optimiser fidelity. Per-state figures are in '
+            '<code>figs/locations_h2/</code>.</div>')
     return "".join(out)
 
 
