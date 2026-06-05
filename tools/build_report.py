@@ -116,43 +116,67 @@ def findings(us, eu):
     return "".join(f"<li>{x}</li>" for x in items)
 
 
+def _fig_box(img):
+    return ('<figure style="margin:1em 0;background:#fff;border:1px solid var(--line);'
+            f'border-radius:8px;padding:10px"><img src="{img}" style="width:100%" '
+            'alt="off-grid datacenter cost by location"></figure>')
+
+
 def locations_section():
-    """The optional 'across geographies' section (figs/locations_fig1.png +
-    output/locations_results.json from tools/build_locations.py). Empty if not built."""
-    path = os.path.join(ROOT, "output", "locations_results.json")
-    fig = _img("locations_fig1.png")
-    if not fig or not os.path.exists(path):
-        return ""
-    with open(path) as fh:
-        data = json.load(fh)
-    rows = "".join(
-        f"<tr><th>{l['label']}</th><td>{'Europe' if l['region']=='eu' else 'US'}</td>"
-        f"<td>{l['irr']:.1f}</td><td>{l['wind']:.1f}</td>"
-        f"<td>{l['cf_solar']:.2f}</td><td>{l['cf_wind']:.2f}</td></tr>"
-        for l in data["locations"])
-    table = ("<table><thead><tr><th>Location</th><th>Region</th>"
-             "<th>Sun (kWh/m²/day)</th><th>Wind (m/s)</th><th>Solar CF</th><th>Wind CF</th>"
-             f"</tr></thead><tbody>{rows}</tbody></table>")
-    re_pct = f"{data['re_target']:.0%}"
-    return (
-        '<h2>Across geographies</h2>'
-        f'<p>The same firm off-grid build at a <b>{re_pct}-renewable</b> target, computed for '
-        'several large EU countries and US states. Within a region only the renewable '
-        '<b>resource</b> differs (gas price, carbon price and technology costs are the region '
-        'default), so this isolates how much <b>where you build</b> moves the cost. The '
-        'non-obvious result: for a <b>firm, always-on</b> load the <b>wind</b> resource matters '
-        'more than the sun — solar is diurnal and needs storage to run through the night — so '
-        '<b>wind-rich sites (United Kingdom, Texas, Iowa) come out cheapest</b>, sun-rich but '
-        'calmer ones (Spain, Arizona) are pricier, and sites poor in both (Virginia) dearest.</p>'
-        '<div class="caveat">These per-location resources are <b>approximate, representative</b> '
-        'values (PVGIS / NSRDB order-of-magnitude), <b>not fetched site measurements</b>, and '
-        'this runs at reduced optimiser fidelity. Read the spread as <b>directional</b>, not '
-        'site-precise; feed real ERA5/NSRDB weather (<code>--weather</code>) to make any '
-        'location exact.</div>'
-        '<figure style="margin:1em 0;background:#fff;border:1px solid var(--line);'
-        f'border-radius:8px;padding:10px"><img src="{fig}" style="width:100%" '
-        'alt="off-grid datacenter cost by location"></figure>'
-        f'{table}')
+    """The 'across geographies' section: an illustrative figure and (if fetched) a real-ERA5
+    figure, from tools/build_locations.py. Empty blocks are skipped."""
+    out = []
+    # ── Illustrative ────────────────────────────────────────────────────────────
+    ip = os.path.join(ROOT, "output", "locations_results.json")
+    ifig = _img("locations_fig1.png")
+    if ifig and os.path.exists(ip):
+        d = json.load(open(ip)); re_pct = f"{d['re_target']:.0%}"
+        rows = "".join(
+            f"<tr><th>{l['label']}</th><td>{'Europe' if l['region']=='eu' else 'US'}</td>"
+            f"<td>{l['irr']:.1f}</td><td>{l['wind']:.1f}</td>"
+            f"<td>{l['cf_solar']:.2f}</td><td>{l['cf_wind']:.2f}</td></tr>" for l in d["locations"])
+        out.append(
+            '<h2>Across geographies</h2>'
+            f'<p>The same firm off-grid build at a <b>{re_pct}-renewable</b> target, computed for '
+            'several large EU countries and US states. Within a region only the renewable '
+            '<b>resource</b> differs (gas, carbon and technology costs are the region default), so '
+            'this isolates how much <b>where you build</b> moves the cost. The non-obvious result: '
+            'for a <b>firm, always-on</b> load the <b>wind</b> resource matters more than the sun — '
+            'solar is diurnal and needs storage to run overnight — so <b>wind-rich sites (United '
+            'Kingdom, Texas, Iowa) come out cheapest</b>, sun-rich but calmer ones (Spain, Arizona) '
+            'are pricier, and sites poor in both (Virginia) dearest.</p>'
+            '<div class="caveat">This first figure uses <b>illustrative, representative</b> '
+            'resource values (not site measurements). The figure below it uses <b>real ERA5 '
+            'weather</b> to make each location exact.</div>'
+            + _fig_box(ifig)
+            + "<table><thead><tr><th>Location</th><th>Region</th><th>Sun (kWh/m²/day)</th>"
+              "<th>Wind (m/s)</th><th>Solar CF</th><th>Wind CF</th></tr></thead>"
+              f"<tbody>{rows}</tbody></table>")
+    # ── Real ERA5 ───────────────────────────────────────────────────────────────
+    rp = os.path.join(ROOT, "output", "locations_real_results.json")
+    rfig = _img("locations_fig1_real.png")
+    if rfig and os.path.exists(rp):
+        d = json.load(open(rp)); re_pct = f"{d['re_target']:.0%}"
+        rows = "".join(
+            f"<tr><th>{l['label']}</th><td>{'Europe' if l['region']=='eu' else 'US'}</td>"
+            f"<td>{l['lat']:.1f}, {l['lon']:.1f}</td>"
+            f"<td>{l['cf_solar']:.2f}</td><td>{l['cf_wind']:.2f}</td></tr>" for l in d["locations"])
+        out.append(
+            '<h3>… with real ERA5 weather</h3>'
+            f'<p>The same {re_pct}-renewable comparison, now driven by <b>measured ERA5 reanalysis '
+            'weather (2019–2021)</b> at one grid point per location — the resource is no longer '
+            'assumed. It confirms the headline (wind-rich UK / Texas / Iowa cheapest) and corrects '
+            'the guesses with real capacity factors (Northern Virginia\'s real wind, for instance, '
+            'is far weaker than the illustrative estimate).</p>'
+            '<div class="caveat">Real hourly ERA5 at one point per location, 3 years (fetched with '
+            '<code>tools/fetch_era5.py</code>). Solar capacity factor is from horizontal irradiance '
+            'scaled ×1.25 to approximate a tilted/tracked plant; gas, carbon and technology costs '
+            'are the region default; reduced optimiser fidelity.</div>'
+            + _fig_box(rfig)
+            + "<table><thead><tr><th>Location</th><th>Region</th><th>Lat, Lon</th>"
+              "<th>Solar CF</th><th>Wind CF</th></tr></thead>"
+              f"<tbody>{rows}</tbody></table>")
+    return "".join(out)
 
 
 def assumptions_table(us, eu):

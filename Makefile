@@ -35,6 +35,9 @@ tables:
 locations:
 	$(PYTHON) tools/build_locations.py
 
+locations-real:   ## needs output/era5/*.npz (tools/fetch_era5.py) + a CDS key
+	$(PYTHON) tools/build_locations.py --real
+
 report:
 	$(PYTHON) tools/build_report.py
 
