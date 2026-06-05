@@ -112,7 +112,8 @@ def _panel(ax, r, top_ylim=None):
     ax.plot(yrs, r["delivered_wind"], color=C_WIND, lw=2.4,
             label="Solar + wind + battery + gas")
     reg = "Europe" if r["region"] == "eu" else "US"
-    ax.set_title(f"{r['label']} ({reg}) · wind CF {r['cf_wind']:.0%}", fontsize=10)
+    ax.set_title(f"{r['label']} ({reg}) · solar CF {r['cf_solar']:.0%}, "
+                 f"wind CF {r['cf_wind']:.0%}", fontsize=10)
     ax.text(0.035, 0.05, f"no-wind {r['target_nowind']:.0%} renewable\n"
             f"with-wind {r['target_wind']:.0%} renewable",
             transform=ax.transAxes, ha="left", va="bottom", fontsize=7.5, color="#333333")

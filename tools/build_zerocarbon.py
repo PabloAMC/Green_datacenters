@@ -78,20 +78,26 @@ def options(region):
     finally:
         h2s._HI = saved
 
+    # Stable `key` (used by the webpage prose) + reader-facing `label`. Note that the three
+    # green H₂ bars are ALL green hydrogen; they differ only along two axes — whether there is a
+    # wind park, and whether the H₂ is self-made (electrolyser on surplus) or bought on the market.
+    def opt(key, label, value, color):
+        return {"key": key, "label": label, "value": round(value, 0), "color": color}
     return [
-        (f"Solar + battery + gas (~{R:.0%} renewable, emits)", round(sb_gas, 0), C_EMIT),
-        ("Solar + wind + battery (90% renewable, ~10% gas)", round(sw90, 0), C_EMIT),
-        ("Solar + wind + battery + green H₂ (zero-carbon)", round(h2wind, 0), C_ZERO),
-        ("Solar + battery + self-made H₂ (zero-carbon, no wind)", round(sb_self, 0), C_ZERO),
-        ("Solar + battery + bought H₂ (zero-carbon, no wind)", round(sb_buy, 0), C_ZERO),
+        opt("gas", f"Solar + battery + gas (~{R:.0%} renewable — emits CO₂)", sb_gas, C_EMIT),
+        opt("sw90", "Solar + wind + battery (90% renewable, ~10% gas)", sw90, C_EMIT),
+        opt("wind_selfmade", "Solar + wind + battery + hydrogen (self-made)", h2wind, C_ZERO),
+        opt("nowind_selfmade", "Solar + battery + hydrogen (self-made, no wind)", sb_self, C_ZERO),
+        opt("nowind_bought", "Solar + battery + hydrogen (bought from market, no wind)", sb_buy, C_ZERO),
     ]
 
 
 def build_figure(data):
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
     for ax, region, title in [(axes[0], "us", "United States"), (axes[1], "eu", "Europe")]:
-        opts = sorted(data[region], key=lambda o: o[1])         # cheapest at top
-        labels = [o[0] for o in opts]; vals = [o[1] for o in opts]; cols = [o[2] for o in opts]
+        opts = sorted(data[region], key=lambda o: o["value"])    # cheapest at top
+        labels = [o["label"] for o in opts]; vals = [o["value"] for o in opts]
+        cols = [o["color"] for o in opts]
         y = np.arange(len(opts))
         ax.barh(y, vals, color=cols, edgecolor="white")
         for yi, v in zip(y, vals):
@@ -107,7 +113,11 @@ def build_figure(data):
                loc="lower center", ncol=2, fontsize=9, frameon=False)
     fig.suptitle("How to build a firm zero-carbon datacenter — cost by build option (2035)",
                  fontsize=13)
-    fig.tight_layout(rect=(0, 0.05, 1, 1))
+    fig.text(0.5, 0.915, "All three hydrogen options are green (zero-carbon). “Self-made” = an "
+             "electrolyser turns surplus renewables into H₂; “bought” = purchased on the market. "
+             "The green bars differ only in the wind park and make-vs-buy.",
+             ha="center", fontsize=8.3, style="italic", color="#444444")
+    fig.tight_layout(rect=(0, 0.05, 1, 0.88))
     return fig
 
 
@@ -122,7 +132,7 @@ def main():
         json.dump({"model_version": MODEL_VERSION, "git_commit": git_commit(),
                    "year": YEAR, "data": data}, fh, indent=2)
     for r in ("us", "eu"):
-        print(f"  {r.upper()}: " + " | ".join(f"{o[0].split('(')[0].strip()} ${o[1]:.0f}"
+        print(f"  {r.upper()}: " + " | ".join(f"{o['label'].split('(')[0].strip()} ${o['value']:.0f}"
               for o in data[r]))
     print(f"Wrote {fp} and output/zerocarbon_results.json")
 

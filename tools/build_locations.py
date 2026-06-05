@@ -39,6 +39,11 @@ RE_TARGET = 0.80   # firm renewable share for the comparison (robustly feasible 
 # label, region, illustrative GHI (kWh/m²/day), illustrative wind (m/s), slug, lat, lon.
 # The illustrative resource drives the synthetic figure; lat/lon drive the --real figure
 # (real ERA5 from output/era5/<slug>.npz, fetched by tools/fetch_era5.py).
+# The seven EU countries and seven US states are the largest data-center markets in each
+# region (US states ranked by capacity/count — Virginia, Texas, Ohio, Georgia, California
+# lead — plus Arizona and Iowa; EU adds Italy and Poland to the big-five economies). The
+# lat/lon is a representative point in each (the real ERA5 figure samples one grid cell there);
+# the illustrative irr/wind are only used by the non-real `make locations` figure.
 LOCATIONS = [
     # ── Europe (EU gas + EU ETS carbon) ──────────────────────────────────────────
     ("Spain",          "eu", 5.0, 6.2, "spain",    40.0,  -3.7),
@@ -46,12 +51,16 @@ LOCATIONS = [
     ("United Kingdom", "eu", 2.7, 8.5, "uk",       53.0,  -1.5),
     ("Germany",        "eu", 3.0, 6.8, "germany",  51.0,  10.0),
     ("Sweden",         "eu", 2.8, 6.8, "sweden",   59.0,  15.0),
+    ("Italy",          "eu", 4.0, 3.8, "italy",    45.5,   9.2),  # Milan / Po valley
+    ("Poland",         "eu", 2.9, 5.5, "poland",   52.2,  21.0),  # Warsaw
     # ── United States (cheap US gas, no federal carbon) ──────────────────────────
+    ("Virginia",       "us", 4.5, 5.8, "virginia", 39.0,  -77.5),  # Ashburn — Data Center Alley
     ("Texas",          "us", 5.5, 8.3, "texas",    32.5, -100.0),
-    ("Arizona",        "us", 6.3, 5.8, "arizona",  33.4, -112.0),
+    ("Ohio",           "us", 3.9, 5.5, "ohio",     40.0,  -83.0),  # Columbus / New Albany
+    ("Georgia",        "us", 4.6, 3.8, "georgia",  33.7,  -84.4),  # Atlanta
+    ("California",     "us", 5.0, 3.5, "california",37.4, -121.9),  # Santa Clara / Silicon Valley
+    ("Arizona",        "us", 6.3, 5.8, "arizona",  33.4, -112.0),  # Phoenix
     ("Iowa",           "us", 4.3, 8.3, "iowa",     42.0,  -93.5),
-    ("Virginia",       "us", 4.5, 5.8, "virginia", 39.0,  -77.5),
-    ("Wyoming",        "us", 5.2, 9.0, "wyoming",  41.8, -107.2),
 ]
 
 # Distinct, print-safe colours (Okabe–Ito + extras), one per location within a panel.

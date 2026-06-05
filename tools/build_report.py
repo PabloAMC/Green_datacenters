@@ -149,8 +149,9 @@ def locations_section():
                        sorted(d["locations"], key=lambda x: (x["region"], x["delivered_wind"][10])))
         out.append(
             '<h2>Across geographies</h2>'
-            '<p>The same firm off-grid build, now computed <b>at each of five large EU countries '
-            f'and five US states</b> on <b>real ERA5 reanalysis weather ({yspan}, {nyears} '
+            '<p>The same firm off-grid build, now computed <b>at each of seven large EU countries '
+            f'and seven US states</b> (the biggest data-center markets in each region) on <b>real '
+            f'ERA5 reanalysis weather ({yspan}, {nyears} '
             'years)</b> — one grid point per location, every real year a dispatch sample (so the '
             'curves carry real interannual variability: dark/calm years included). Within a region '
             'only the renewable <b>resource</b> differs — gas, carbon and technology costs are the '
@@ -163,12 +164,17 @@ def locations_section():
             '<b style="color:#0072B2">~80%</b>. The grey dashed line is the region gas baseline; '
             'the <b style="color:#8e44ad">purple dash-dot line is a small modular (nuclear) '
             'reactor</b> — a firm, always-on reference that is never part of the optimisation. '
-            'The closer the two coloured lines, the less a wind park earns you there — so in the '
-            'calm, sunny Southwest (Arizona, which can\'t even reach 80% and is clamped to ~75%) '
-            'wind barely helps, while in the windy plains and a blustery United Kingdom it pays '
-            'off clearly. Note the regional contrast against firm nuclear: in the cheap-gas US the '
-            'renewable builds sit well below the reactor line, whereas in carbon-priced Europe the '
-            'reactor is competitive with — sometimes cheaper than — the high-renewable build.</p>'
+            '<b>Whether the wind park is worth it depends on the gas price.</b> In <b>carbon-priced '
+            'Europe</b> a wind park <i>lowers</i> delivered cost — it displaces expensive gas — so '
+            'the blue 80% line sits <i>below</i> the orange 55% one across the windy markets (the '
+            'United Kingdom, Sweden, France, Poland). In the <b>cheap-gas US</b> the opposite holds: '
+            'the extra renewables cost more than the gas they save, so the 80% build sits <i>above</i> '
+            'the 55% one. And in the calmest sites — Arizona, California and Italy, all around a 2% '
+            'wind capacity factor — an 80% target is simply infeasible without real wind, so that '
+            'line is clamped to ~70–75% and stays dear no matter what. Against firm nuclear: in the '
+            'cheap-gas US the renewable+gas builds sit well below the reactor line, whereas in '
+            'carbon-priced Europe the reactor is competitive with — sometimes cheaper than — the '
+            'high-renewable build.</p>'
             + _fig_box(refig)
             + "<table><thead><tr><th>State</th><th>Region</th><th>Solar CF</th><th>Wind CF</th>"
               "<th>No wind · 2035</th><th>With wind · 2035</th></tr></thead>"
@@ -203,10 +209,11 @@ def locations_section():
             'are <b>zero-carbon by construction</b> — <b style="color:#b07900">solar + battery + '
             'hydrogen (no wind)</b> and <b style="color:#0072B2">solar + wind + battery + '
             f'hydrogen</b> — on the same {yspan} weather. Again the gap between the lines is what a '
-            'wind park buys: where wind is strong (Wyoming, Iowa, Texas; the United Kingdom) it '
-            'sits well below the no-wind line; where it is weak (Arizona, Virginia; Germany) the '
-            'two nearly coincide and the easier-to-permit no-wind build costs little extra. The '
-            'grey dashed line is the region gas baseline (it emits); the '
+            'wind park buys: where wind is strong it sits well below the no-wind line (Sweden, the '
+            'United Kingdom and Poland save ~$45–53/MWh; Iowa, Texas and Ohio ~$27–36 in the US); '
+            'where wind is scarce — Arizona, California and Italy, all around a 2% capacity factor '
+            '— the two lines nearly coincide (~$5–8) and the easier-to-permit no-wind build costs '
+            'little extra. The grey dashed line is the region gas baseline (it emits); the '
             '<b style="color:#8e44ad">purple dash-dot line is a small modular (nuclear) '
             'reactor</b> — the other firm zero-carbon option — which here is often competitive '
             'with the hydrogen build, especially in carbon-priced Europe.</p>'
@@ -251,21 +258,26 @@ def wind_section():
     if zfig and os.path.exists(zp):
         z = json.load(open(zp))
 
-        def c(region, sub):
-            return next(o[1] for o in z["data"][region] if sub in o[0])
+        def c(region, key):
+            return next(o["value"] for o in z["data"][region] if o["key"] == key)
         blocks.append(
             '<h3>… and what about solar + battery + hydrogen (no wind)?</h3>'
             '<p>To go <b>fully zero-carbon without a wind park</b>, replace the gas backstop with '
-            'green hydrogen. How you get the H₂ matters enormously: <b>buying</b> it all is '
-            f'expensive (${c("us","bought"):.0f}/MWh US, ${c("eu","bought"):.0f} EU), but '
-            '<b>making it from surplus solar</b> (a solar-heavy build + an electrolyser, buying '
-            f'only a few percent) brings a fully zero-carbon, wind-free datacenter to '
-            f'<b>~${c("us","self-made"):.0f}/MWh (US) / ${c("eu","self-made"):.0f} (EU)</b> by '
-            f'{z["year"]} — only ~$12–17 above the <i>with-wind</i> zero-carbon system '
-            f'(${c("us","wind + battery + green"):.0f} / ${c("eu","wind + battery + green"):.0f}). '
-            'So wind-free zero-carbon is feasible at a modest premium — and in Europe the '
-            'with-wind green-H₂ system is actually the <b>cheapest option of all</b>, since '
-            'carbon-priced gas is dearer.</p>'
+            'green hydrogen. <b>All the hydrogen options below are green</b> (zero-carbon) — they '
+            'differ only in <b>how you get the H₂</b>. <b>Making it yourself</b> — a solar-heavy '
+            'build plus an electrolyser that turns <i>surplus</i> renewables into H₂, buying only '
+            'a few percent from the market — brings a wind-free zero-carbon datacenter to '
+            f'<b>~${c("us","nowind_selfmade"):.0f}/MWh (US) / ${c("eu","nowind_selfmade"):.0f} '
+            f'(EU)</b> by {z["year"]}. <b>Buying it all</b> on the market instead (no electrolyser) '
+            f'is far dearer (${c("us","nowind_bought"):.0f} / ${c("eu","nowind_bought"):.0f}). And '
+            'the self-made wind-free build is only ~$12–17 above the <i>same self-made build with a '
+            f'wind park added</i> (${c("us","wind_selfmade"):.0f} / ${c("eu","wind_selfmade"):.0f}) '
+            '— so the wind park, not the hydrogen, is the smaller lever here. In Europe that '
+            'with-wind build is actually the <b>cheapest option of all</b>, since carbon-priced gas '
+            'is dearer.</p>'
+            '<p class="sub" style="font-size:13px">In the chart, the three green bars are the same '
+            'green hydrogen; the only differences are <b>whether there is a wind park</b> and '
+            '<b>whether the H₂ is self-made or bought</b>.</p>'
             + _fig_box(zfig))
     return "".join(blocks)
 
@@ -351,6 +363,30 @@ trust the <b>directional comparisons</b>, not absolute numbers to better than <b
 The headline runs on <b>synthetic (not measured) weather</b> and a <b>single generation
 site</b> by default; both can be replaced with real reanalysis and multi-site portfolios.
 All numbers below are generated directly from the model's exported results.</div>
+
+<h2>The problem this models</h2>
+<p>Training and serving AI has turned electricity into the binding constraint on computing. A
+single new datacenter can draw as much power as a small city, and the queue to connect a large
+new load to the grid now stretches for <b>years</b> across much of the US and Europe. So a
+growing number of operators are asking a once-exotic question: instead of waiting for the grid,
+can you build a datacenter together with its own dedicated power plant — <b>off-grid</b> — and
+run it on mostly renewable energy?</p>
+<p>That is harder than it sounds, because a datacenter is a <b>firm</b> (always-on) load: it
+needs power every hour of every day, while solar and wind do not. The sun sets; the wind can
+drop for days at a time (a German word, <i>Dunkelflaute</i>, has become the industry term for a
+dark, windless spell). To keep the servers running you must <b>overbuild</b> generation, add
+<b>storage</b>, and keep some <b>firm backstop</b> — historically a gas turbine, but it could
+instead be green hydrogen or a small nuclear reactor. Each additional percentage point of
+renewable energy costs more than the last, because covering the rarest, darkest, calmest hours
+of the year dominates the bill.</p>
+<p>This model works out, transparently, the <b>least-cost mix</b> of solar, wind, battery and
+backup for such a plant, and the resulting <b>delivered cost</b> — its levelised cost of energy
+(LCOE: the all-in price per MWh of datacenter load once capital, fuel and maintenance are spread
+over the plant's life) — for the United States and Europe, every year from 2025 to 2040. It
+answers three practical questions: <b>how much</b> of the year you can actually run on
+renewables; <b>what it costs</b> versus simply burning gas, and when going green becomes the
+cheaper choice; and how the answer shifts with <b>where you build</b>, <b>whether you build a
+wind park</b>, and <b>how you firm the last few percent</b> (gas, hydrogen, or nuclear).</p>
 
 <h2>Key findings</h2>
 <ul class="find">{findings}</ul>

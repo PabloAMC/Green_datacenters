@@ -1,61 +1,71 @@
 {
   "model_version": "5.6.0",
-  "git_commit": "7d1cfdf",
+  "git_commit": "625e836",
   "year": 2035,
   "data": {
     "us": [
-      [
-        "Solar + battery + gas (~66% renewable, emits)",
-        65.0,
-        "#9a8c7a"
-      ],
-      [
-        "Solar + wind + battery (90% renewable, ~10% gas)",
-        75.0,
-        "#9a8c7a"
-      ],
-      [
-        "Solar + wind + battery + green H\u2082 (zero-carbon)",
-        93.0,
-        "#2a9d5c"
-      ],
-      [
-        "Solar + battery + self-made H\u2082 (zero-carbon, no wind)",
-        105.0,
-        "#2a9d5c"
-      ],
-      [
-        "Solar + battery + bought H\u2082 (zero-carbon, no wind)",
-        160.0,
-        "#2a9d5c"
-      ]
+      {
+        "key": "gas",
+        "label": "Solar + battery + gas (~66% renewable \u2014 emits CO\u2082)",
+        "value": 65.0,
+        "color": "#9a8c7a"
+      },
+      {
+        "key": "sw90",
+        "label": "Solar + wind + battery (90% renewable, ~10% gas)",
+        "value": 75.0,
+        "color": "#9a8c7a"
+      },
+      {
+        "key": "wind_selfmade",
+        "label": "Solar + wind + battery + hydrogen (self-made)",
+        "value": 93.0,
+        "color": "#2a9d5c"
+      },
+      {
+        "key": "nowind_selfmade",
+        "label": "Solar + battery + hydrogen (self-made, no wind)",
+        "value": 105.0,
+        "color": "#2a9d5c"
+      },
+      {
+        "key": "nowind_bought",
+        "label": "Solar + battery + hydrogen (bought from market, no wind)",
+        "value": 160.0,
+        "color": "#2a9d5c"
+      }
     ],
     "eu": [
-      [
-        "Solar + battery + gas (~66% renewable, emits)",
-        109.0,
-        "#9a8c7a"
-      ],
-      [
-        "Solar + wind + battery (90% renewable, ~10% gas)",
-        102.0,
-        "#9a8c7a"
-      ],
-      [
-        "Solar + wind + battery + green H\u2082 (zero-carbon)",
-        99.0,
-        "#2a9d5c"
-      ],
-      [
-        "Solar + battery + self-made H\u2082 (zero-carbon, no wind)",
-        116.0,
-        "#2a9d5c"
-      ],
-      [
-        "Solar + battery + bought H\u2082 (zero-carbon, no wind)",
-        169.0,
-        "#2a9d5c"
-      ]
+      {
+        "key": "gas",
+        "label": "Solar + battery + gas (~66% renewable \u2014 emits CO\u2082)",
+        "value": 109.0,
+        "color": "#9a8c7a"
+      },
+      {
+        "key": "sw90",
+        "label": "Solar + wind + battery (90% renewable, ~10% gas)",
+        "value": 102.0,
+        "color": "#9a8c7a"
+      },
+      {
+        "key": "wind_selfmade",
+        "label": "Solar + wind + battery + hydrogen (self-made)",
+        "value": 99.0,
+        "color": "#2a9d5c"
+      },
+      {
+        "key": "nowind_selfmade",
+        "label": "Solar + battery + hydrogen (self-made, no wind)",
+        "value": 116.0,
+        "color": "#2a9d5c"
+      },
+      {
+        "key": "nowind_bought",
+        "label": "Solar + battery + hydrogen (bought from market, no wind)",
+        "value": 169.0,
+        "color": "#2a9d5c"
+      }
     ]
   }
 }
