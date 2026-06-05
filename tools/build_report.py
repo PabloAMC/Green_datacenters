@@ -179,6 +179,31 @@ def locations_section():
     return "".join(out)
 
 
+def wind_section():
+    """The 'do you need a wind park?' section (figs/solar_only.png +
+    output/solar_only_results.json from tools/build_solar_only.py). Empty if not built."""
+    path = os.path.join(ROOT, "output", "solar_only_results.json")
+    fig = _img("solar_only.png")
+    if not fig or not os.path.exists(path):
+        return ""
+    d = json.load(open(path)); yr = d["year"]
+    wall = d["data"]["us"]["solo"]["max_re"]
+    return (
+        '<h2>Do you even need a wind park?</h2>'
+        '<p>Solar panels are modular and quick to permit; a wind park is a far bigger siting '
+        'and permitting undertaking. So it is worth asking what <b>dropping wind entirely</b> '
+        'costs. This compares a solar + wind + battery build against <b>solar + battery only</b> '
+        f'(both firm, with gas backup) in {yr}.</p>'
+        f'<p><b>There is a hard wall.</b> A solar + battery + gas system tops out near '
+        f'<b>~{wall:.0%} renewable</b> — nights <i>and</i> multi-day cloud always fall to gas, '
+        'and a battery cannot shift energy across days — whereas adding wind reaches ~94%. Below '
+        'the wall, solar-only is only modestly pricier in the US (strong solar) and a clearer '
+        'premium in Europe (weak winter sun). <b>Bottom line:</b> for a <i>moderate</i> renewable '
+        'target, solar + battery alone is a reasonable, much-easier-to-build choice; pushing to '
+        '<i>high</i> renewable fractions genuinely needs wind (or long-duration storage / hydrogen).</p>'
+        + _fig_box(fig))
+
+
 def assumptions_table(us, eu):
     uc, ec = us["simulated_cf"], eu["simulated_cf"]
     rows = [
@@ -291,6 +316,8 @@ first year the build's delivered cost drops below the gas baseline.</p>
 
 {locations_section}
 
+{wind_section}
+
 <h2>Key assumptions</h2>
 {assumptions}
 <p class="sub" style="font-size:13.5px">All in real 2025 USD. Costs fall over time via
@@ -329,6 +356,7 @@ def main():
         fig3_eu=_img("eu_firm_fig3_optimal_mix.png"),
         assumptions=assumptions_table(us, eu),
         locations_section=locations_section(),
+        wind_section=wind_section(),
         version=MODEL_VERSION,
         commit=prov.get("git_commit", "—"),
         cfg=prov.get("config_sha256", "—"),

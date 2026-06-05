@@ -38,6 +38,9 @@ locations:
 locations-real:   ## needs output/era5/*.npz (tools/fetch_era5.py) + a CDS key
 	$(PYTHON) tools/build_locations.py --real
 
+solar-only:
+	$(PYTHON) tools/build_solar_only.py
+
 report:
 	$(PYTHON) tools/build_report.py
 
