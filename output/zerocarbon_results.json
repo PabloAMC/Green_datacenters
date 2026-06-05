@@ -1,0 +1,61 @@
+{
+  "model_version": "5.6.0",
+  "git_commit": "7d1cfdf",
+  "year": 2035,
+  "data": {
+    "us": [
+      [
+        "Solar + battery + gas (~66% renewable, emits)",
+        65.0,
+        "#9a8c7a"
+      ],
+      [
+        "Solar + wind + battery (90% renewable, ~10% gas)",
+        75.0,
+        "#9a8c7a"
+      ],
+      [
+        "Solar + wind + battery + green H\u2082 (zero-carbon)",
+        93.0,
+        "#2a9d5c"
+      ],
+      [
+        "Solar + battery + self-made H\u2082 (zero-carbon, no wind)",
+        105.0,
+        "#2a9d5c"
+      ],
+      [
+        "Solar + battery + bought H\u2082 (zero-carbon, no wind)",
+        160.0,
+        "#2a9d5c"
+      ]
+    ],
+    "eu": [
+      [
+        "Solar + battery + gas (~66% renewable, emits)",
+        109.0,
+        "#9a8c7a"
+      ],
+      [
+        "Solar + wind + battery (90% renewable, ~10% gas)",
+        102.0,
+        "#9a8c7a"
+      ],
+      [
+        "Solar + wind + battery + green H\u2082 (zero-carbon)",
+        99.0,
+        "#2a9d5c"
+      ],
+      [
+        "Solar + battery + self-made H\u2082 (zero-carbon, no wind)",
+        116.0,
+        "#2a9d5c"
+      ],
+      [
+        "Solar + battery + bought H\u2082 (zero-carbon, no wind)",
+        169.0,
+        "#2a9d5c"
+      ]
+    ]
+  }
+}

@@ -41,6 +41,9 @@ locations-real:   ## needs output/era5/*.npz (tools/fetch_era5.py) + a CDS key
 solar-only:
 	$(PYTHON) tools/build_solar_only.py
 
+zerocarbon:
+	$(PYTHON) tools/build_zerocarbon.py
+
 report:
 	$(PYTHON) tools/build_report.py
 

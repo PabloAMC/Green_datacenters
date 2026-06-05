@@ -188,7 +188,7 @@ def wind_section():
         return ""
     d = json.load(open(path)); yr = d["year"]
     wall = d["data"]["us"]["solo"]["max_re"]
-    return (
+    blocks = [
         '<h2>Do you even need a wind park?</h2>'
         '<p>Solar panels are modular and quick to permit; a wind park is a far bigger siting '
         'and permitting undertaking. So it is worth asking what <b>dropping wind entirely</b> '
@@ -201,7 +201,31 @@ def wind_section():
         'premium in Europe (weak winter sun). <b>Bottom line:</b> for a <i>moderate</i> renewable '
         'target, solar + battery alone is a reasonable, much-easier-to-build choice; pushing to '
         '<i>high</i> renewable fractions genuinely needs wind (or long-duration storage / hydrogen).</p>'
-        + _fig_box(fig))
+        + _fig_box(fig)]
+
+    # ── Zero-carbon synthesis (solar+battery+H₂) ────────────────────────────────
+    zp = os.path.join(ROOT, "output", "zerocarbon_results.json")
+    zfig = _img("zerocarbon.png")
+    if zfig and os.path.exists(zp):
+        z = json.load(open(zp))
+
+        def c(region, sub):
+            return next(o[1] for o in z["data"][region] if sub in o[0])
+        blocks.append(
+            '<h3>… and what about solar + battery + hydrogen (no wind)?</h3>'
+            '<p>To go <b>fully zero-carbon without a wind park</b>, replace the gas backstop with '
+            'green hydrogen. How you get the H₂ matters enormously: <b>buying</b> it all is '
+            f'expensive (${c("us","bought"):.0f}/MWh US, ${c("eu","bought"):.0f} EU), but '
+            '<b>making it from surplus solar</b> (a solar-heavy build + an electrolyser, buying '
+            f'only a few percent) brings a fully zero-carbon, wind-free datacenter to '
+            f'<b>~${c("us","self-made"):.0f}/MWh (US) / ${c("eu","self-made"):.0f} (EU)</b> by '
+            f'{z["year"]} — only ~$12–17 above the <i>with-wind</i> zero-carbon system '
+            f'(${c("us","wind + battery + green"):.0f} / ${c("eu","wind + battery + green"):.0f}). '
+            'So wind-free zero-carbon is feasible at a modest premium — and in Europe the '
+            'with-wind green-H₂ system is actually the <b>cheapest option of all</b>, since '
+            'carbon-priced gas is dearer.</p>'
+            + _fig_box(zfig))
+    return "".join(blocks)
 
 
 def assumptions_table(us, eu):
