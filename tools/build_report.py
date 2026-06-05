@@ -372,29 +372,33 @@ The headline runs on <b>synthetic (not measured) weather</b> and a <b>single gen
 site</b> by default; both can be replaced with real reanalysis and multi-site portfolios.
 All numbers below are generated directly from the model's exported results.</div>
 
-<h2>The problem this models</h2>
-<p>Training and serving AI has turned electricity into the binding constraint on computing. A
-single new datacenter can draw as much power as a small city, and the queue to connect a large
-new load to the grid now stretches for <b>years</b> across much of the US and Europe. So a
-growing number of operators are asking a once-exotic question: instead of waiting for the grid,
-can you build a datacenter together with its own dedicated power plant — <b>off-grid</b> — and
-run it on mostly renewable energy?</p>
-<p>That is harder than it sounds, because a datacenter is a <b>firm</b> (always-on) load: it
-needs power every hour of every day, while solar and wind do not. The sun sets; the wind can
-drop for days at a time (a German word, <i>Dunkelflaute</i>, has become the industry term for a
-dark, windless spell). To keep the servers running you must <b>overbuild</b> generation, add
-<b>storage</b>, and keep some <b>firm backstop</b> — historically a gas turbine, but it could
-instead be green hydrogen or a small nuclear reactor. Each additional percentage point of
-renewable energy costs more than the last, because covering the rarest, darkest, calmest hours
-of the year dominates the bill.</p>
+<h2>The question: how dirty does an AI datacenter have to be?</h2>
+<p>The boom in AI datacenters has come with a worry that is now a headline in its own right —
+that they are an <b>environmental problem</b>, that their soaring electricity demand simply means
+a surge in carbon emissions. This model exists to test, with numbers, <b>how justified that worry
+is</b>. The real question is not whether a datacenter draws a lot of power — it does — but whether
+that power can be <b>clean</b>, and what it costs to make it so.</p>
+<p>The natural way to clean up a datacenter is to build it together with its own dedicated
+generation — solar, wind and batteries, off-grid or behind the meter. The catch is that a
+datacenter is a <b>firm</b> (always-on) load: it needs power every hour of every day, while sun
+and wind do not. The sun sets; the wind can drop for days at a time (a <i>Dunkelflaute</i>). So
+the environmental question comes down to the <b>backstop</b> that covers those gaps: do you fall
+back on a <b>gas</b> turbine, which emits, or on a <b>clean firm</b> option — green hydrogen, a
+small nuclear reactor, or enough storage — and how much does each cost? Squeezing the last
+emissions out, from ~90% renewable to a true 100%, is where the bill climbs, because the rarest
+dark, windless hours dominate it.</p>
 <p>This model works out, transparently, the <b>least-cost mix</b> of solar, wind, battery and
 backup for such a plant, and the resulting <b>delivered cost</b> — its levelised cost of energy
 (LCOE: the all-in price per MWh of datacenter load once capital, fuel and maintenance are spread
-over the plant's life) — for the United States and Europe, every year from 2025 to 2040. It
-answers three practical questions: <b>how much</b> of the year you can actually run on
-renewables; <b>what it costs</b> versus simply burning gas, and when going green becomes the
-cheaper choice; and how the answer shifts with <b>where you build</b>, <b>whether you build a
-wind park</b>, and <b>how you firm the last few percent</b> (gas, hydrogen, or nuclear).</p>
+over the plant's life) — for the United States and Europe, every year from 2025 to 2040. So it
+answers the environmental question directly: <b>how much</b> of the year a datacenter can run on
+renewables; <b>what a clean datacenter costs</b> versus simply burning gas, and when clean becomes
+the <i>cheaper</i> choice rather than just the greener one; and whether a fully <b>zero-carbon</b>,
+always-on datacenter is achievable today — and at what premium. The short answer, worked out
+below: a datacenter need not be dirty. Running fully zero-carbon already costs only a modest
+premium over gas in the cheap-gas US — and in carbon-priced Europe it is increasingly the
+<i>cheaper</i> option — with that premium shrinking every year as solar, batteries and
+electrolysers get cheaper.</p>
 
 <h2>Key findings</h2>
 <ul class="find">{findings}</ul>
