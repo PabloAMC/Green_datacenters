@@ -42,7 +42,7 @@ from lcoe.params import REGIONS, _sys_with, MODEL_VERSION        # noqa: E402
 from lcoe.costs import gas_pure_lcoe, smr_trajectory             # noqa: E402
 from lcoe.reporting import git_commit                            # noqa: E402
 from lcoe.weather import load_weather_traces                     # noqa: E402
-from tools.build_locations import LOCATIONS                      # noqa: E402
+from tools.build_locations import LOCATIONS, cf_consistent_techs  # noqa: E402
 
 YEARS = 15            # 2025 → 2040
 # Default ceilings allow a wind park; NO_WIND forces the second entry (wind cap) to 0.
@@ -76,6 +76,10 @@ def run_location(label, region, irr, wind, slug, lat, lon):
     with np.load(npz) as d:
         wyears = [int(y) for y in d["years"]]
     g = reg["gas"]
+    cf_s = float(np.mean([s for s, _ in traces]))
+    cf_w = float(np.mean([w for _, w in traces]))
+    solar_t, wind_t = cf_consistent_techs(reg, region, cf_s, cf_w)   # re-anchor LCOE to site CF
+    reg = {**reg, "solar": solar_t, "wind": wind_t}
     lcoe_nw, buy_nw, _ = _trajectory(reg, irr, wind, traces, NO_WIND_HI)
     lcoe_w, buy_w, cwin = _trajectory(reg, irr, wind, traces, WIND_HI)
     return {"label": label, "region": region, "slug": slug, "lat": lat, "lon": lon,

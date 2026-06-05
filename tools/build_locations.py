@@ -20,6 +20,7 @@ Run at reduced optimiser fidelity (it is a cross-location comparison, not the he
 import json
 import os
 import sys
+from dataclasses import replace
 
 import numpy as np
 import matplotlib
@@ -33,6 +34,37 @@ from lcoe.params import REGIONS, _sys_with, FIRM, MODEL_VERSION  # noqa: E402
 from lcoe.simulate import run_simulation                        # noqa: E402
 from lcoe.reporting import git_commit                           # noqa: E402
 from lcoe.weather import load_weather_traces                    # noqa: E402
+
+_CF_REF_CACHE = {}
+
+
+def cf_reference(region):
+    """The model's calibration capacity factors — the synthetic-weather CFs the Lazard
+    `lcoe_today` values are anchored to (see params.py "CF-CONSISTENCY"). Read once from
+    the headline firm-results export (US ≈ solar 0.23 / wind 0.33, EU ≈ 0.16 / 0.29)."""
+    if region not in _CF_REF_CACHE:
+        fj = json.load(open(os.path.join(ROOT, "output", f"{region}_firm_results.json")))
+        cf = fj["simulated_cf"]
+        _CF_REF_CACHE[region] = (float(cf["solar"]), float(cf["wind"]))
+    return _CF_REF_CACHE[region]
+
+
+def cf_consistent_techs(reg, region, cf_solar_site, cf_wind_site):
+    """Re-anchor solar & wind `lcoe_today` from the calibration CF to THIS site's real CF.
+
+    An LCOE is capex+FOM spread over a specific capacity factor, so feeding real weather at
+    a different CF without rescaling under-prices low-CF generation (e.g. wind at a 2%-CF
+    site looks as cheap per-MWh as wind at a 30%-CF site). Scaling `lcoe_today` by
+    `ref_CF / site_CF` holds the cost per unit *capacity* fixed, so a calm site correctly
+    pays a higher $/MWh for wind (and a sunny site a lower $/MWh for solar). LCOE is linear
+    in `lcoe_today` (wright_law × rewacc_lcoe), so this scales the whole trajectory.
+    Returns (solar, wind) TechParams."""
+    ref_s, ref_w = cf_reference(region)
+    solar = replace(reg["solar"],
+                    lcoe_today=reg["solar"].lcoe_today * ref_s / max(cf_solar_site, 1e-6))
+    wind = replace(reg["wind"],
+                   lcoe_today=reg["wind"].lcoe_today * ref_w / max(cf_wind_site, 1e-6))
+    return solar, wind
 
 RE_TARGET = 0.80   # firm renewable share for the comparison (robustly feasible everywhere)
 
@@ -74,12 +106,16 @@ def run_location(label, region, irr, wind, slug, lat, lon,
     sysp = _sys_with(reg["sys"], grid_steps=grid_steps, n_mc_weather=n_mc)
     weather_years = None
     wyears = []
+    solar_t, wind_t = reg["solar"], reg["wind"]
     if real:                                   # drive the dispatch with real ERA5 years
         npz = os.path.join(ROOT, "output", "era5", f"{slug}.npz")
         weather_years = load_weather_traces(npz)
         with np.load(npz) as d:
             wyears = [int(y) for y in d["years"]]
-    r = run_simulation(solar=reg["solar"], wind=reg["wind"], battery=reg["battery"],
+        cf_s = float(np.mean([s for s, _ in weather_years]))
+        cf_w = float(np.mean([w for _, w in weather_years]))
+        solar_t, wind_t = cf_consistent_techs(reg, region, cf_s, cf_w)  # re-anchor LCOE to site CF
+    r = run_simulation(solar=solar_t, wind=wind_t, battery=reg["battery"],
                        gas=reg["gas"], smr=reg["smr"], sys=sysp, workload=FIRM,
                        mean_irr=irr, mean_wind_ms=wind, years=years,
                        reliabilities=[RE_TARGET], seed=seed, grid_ppa=reg.get("grid_ppa"),

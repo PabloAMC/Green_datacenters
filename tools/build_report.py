@@ -131,7 +131,7 @@ def locations_section():
     out = []
     intro_done = False
 
-    # ── Gas-backed, renewable target: ~55% no-wind vs ~80% with-wind ──────────────
+    # ── Gas-backed: is a wind park worth it? (same target, wind optional) ──────────
     rep = os.path.join(ROOT, "output", "locations_re_results.json")
     refig = _img("locations_re_grid.png")
     if refig and os.path.exists(rep):
@@ -141,10 +141,11 @@ def locations_section():
         nyears = len({y for x in d["locations"] for y in x.get("weather_years", [])}) or 11
 
         def rrow(x):
+            nw, w = x["delivered_nowind"][10], x["delivered_wind"][10]
             return (f"<tr><th>{x['label']}</th><td>{'Europe' if x['region']=='eu' else 'US'}</td>"
                     f"<td>{x['cf_solar']:.2f}</td><td>{x['cf_wind']:.2f}</td>"
-                    f"<td>{x['target_nowind']:.0%} · ${x['delivered_nowind'][10]:.0f}</td>"
-                    f"<td>{x['target_wind']:.0%} · ${x['delivered_wind'][10]:.0f}</td></tr>")
+                    f"<td>{x['target']:.0%}</td><td>${nw:.0f}</td><td>${w:.0f}</td>"
+                    f"<td>${nw - w:.0f}</td></tr>")
         rows = "".join(rrow(x) for x in
                        sorted(d["locations"], key=lambda x: (x["region"], x["delivered_wind"][10])))
         out.append(
@@ -157,33 +158,37 @@ def locations_section():
             'only the renewable <b>resource</b> differs — gas, carbon and technology costs are the '
             'region default — so this isolates how much <b>where you build</b>, and <b>whether you '
             'build a wind park</b>, move the cost.</p>'
-            '<h3>Gas-backed, at a renewable target: ~55% without wind vs ~80% with wind</h3>'
-            '<p>Solar panels are quick to permit; a wind park is a far bigger siting undertaking. '
-            'A solar + battery + gas system reaches about <b style="color:#b07900">55% renewable '
-            'comfortably without any wind</b>; adding a wind park lifts the same firm build to '
-            '<b style="color:#0072B2">~80%</b>. The grey dashed line is the region gas baseline; '
-            'the <b style="color:#8e44ad">purple dash-dot line is a small modular (nuclear) '
-            'reactor</b> — a firm, always-on reference that is never part of the optimisation. '
-            '<b>Whether the wind park is worth it depends on the gas price.</b> In <b>carbon-priced '
-            'Europe</b> a wind park <i>lowers</i> delivered cost — it displaces expensive gas — so '
-            'the blue 80% line sits <i>below</i> the orange 55% one across the windy markets (the '
-            'United Kingdom, Sweden, France, Poland). In the <b>cheap-gas US</b> the opposite holds: '
-            'the extra renewables cost more than the gas they save, so the 80% build sits <i>above</i> '
-            'the 55% one. And in the calmest sites — Arizona, California and Italy, all around a 2% '
-            'wind capacity factor — an 80% target is simply infeasible without real wind, so that '
-            'line is clamped to ~70–75% and stays dear no matter what. Against firm nuclear: in the '
-            'cheap-gas US the renewable+gas builds sit well below the reactor line, whereas in '
-            'carbon-priced Europe the reactor is competitive with — sometimes cheaper than — the '
-            'high-renewable build.</p>'
+            '<h3>Is a wind park worth building? (gas-backed)</h3>'
+            '<p>Solar panels are quick to permit; a wind park is a far bigger siting undertaking, '
+            'so it is worth asking where one actually pays off. This is a <b>fair</b> test: both '
+            'builds are optimised to the <b>same renewable target</b> at each site — the most a '
+            'solar + battery + gas system can reach <i>without</i> wind (~55–68%, shown in each '
+            'panel) — and the <b style="color:#0072B2">wind build is simply allowed to add a wind '
+            'park only if it lowers cost</b>. Because building no wind is always an option, the '
+            'blue line is <b>never above</b> the orange <b style="color:#b07900">no-wind</b> line: '
+            'it <b>dips below where wind genuinely competes</b> (the windy markets — the United '
+            'Kingdom; Texas, Iowa) and <b>all but merges with it where wind is too weak to bother</b> '
+            '(Arizona, California, Italy, ~2% capacity factor — the optimiser builds almost none, so '
+            'by the mid-2030s the lines coincide). The grey '
+            'dashed line is the gas baseline; the <b style="color:#8e44ad">purple dash-dot line a '
+            'small modular (nuclear) reactor</b>. Pushing renewables <i>beyond</i> this no-wind '
+            'ceiling needs either a wind park where the wind is good, or storage/hydrogen — that is '
+            'the next two figures. (The reactor is competitive in carbon-priced Europe; in the '
+            'cheap-gas US the renewable+gas builds sit well below it.)</p>'
             + _fig_box(refig)
             + "<table><thead><tr><th>State</th><th>Region</th><th>Solar CF</th><th>Wind CF</th>"
-              "<th>No wind · 2035</th><th>With wind · 2035</th></tr></thead>"
+              "<th>Target</th><th>No wind 2035</th><th>Wind-optional 2035</th>"
+              "<th>Wind saves</th></tr></thead>"
               f"<tbody>{rows}</tbody></table>"
             '<div class="caveat">Real hourly ERA5 at one point per location ('
             f'{yspan}); solar capacity factor from horizontal irradiance ×1.25; region-default '
-            'gas, carbon and technology costs; reduced optimiser fidelity (directional to ~±15% '
-            'in level — the cross-site <i>ranking</i> and the <i>wind gap</i> are the robust '
-            'messages). Per-state figures are in <code>figs/locations_re/</code>.</div>')
+            'gas, carbon and technology costs. Each site\'s solar and wind LCOE is <b>re-anchored '
+            'from the model\'s calibration capacity factor to that site\'s real CF</b>, so a '
+            'low-wind site correctly pays more per MWh for wind (and the optimiser builds none '
+            'where it is not competitive) and a sunny site pays less for solar. Reduced optimiser '
+            'fidelity (directional to ~±15% in level — the cross-site <i>ranking</i> and the '
+            '<i>wind gap</i> are the robust messages). Per-state figures are in '
+            '<code>figs/locations_re/</code>.</div>')
         intro_done = True
 
     # ── Fully zero-carbon, self-made hydrogen: no-wind vs with-wind ───────────────
@@ -209,11 +214,12 @@ def locations_section():
             'are <b>zero-carbon by construction</b> — <b style="color:#b07900">solar + battery + '
             'hydrogen (no wind)</b> and <b style="color:#0072B2">solar + wind + battery + '
             f'hydrogen</b> — on the same {yspan} weather. Again the gap between the lines is what a '
-            'wind park buys: where wind is strong it sits well below the no-wind line (Sweden, the '
-            'United Kingdom and Poland save ~$45–53/MWh; Iowa, Texas and Ohio ~$27–36 in the US); '
-            'where wind is scarce — Arizona, California and Italy, all around a 2% capacity factor '
-            '— the two lines nearly coincide (~$5–8) and the easier-to-permit no-wind build costs '
-            'little extra. The grey dashed line is the region gas baseline (it emits); the '
+            'wind park buys: where wind is strong it sits well below the no-wind line (the United '
+            'Kingdom saves ~$53/MWh, Sweden ~$39, Iowa and Poland ~$30); where wind is scarce — '
+            'Arizona, California and Italy, all around a 2% capacity factor — the optimiser builds '
+            'essentially no wind, so the two lines coincide (wind saves ~$0) and the '
+            'easier-to-permit no-wind build is the one to pick. The grey dashed line is the region '
+            'gas baseline (it emits); the '
             '<b style="color:#8e44ad">purple dash-dot line is a small modular (nuclear) '
             'reactor</b> — the other firm zero-carbon option — which here is often competitive '
             'with the hydrogen build, especially in carbon-priced Europe.</p>'
@@ -223,8 +229,10 @@ def locations_section():
               f"<tbody>{rows}</tbody></table>"
             '<div class="caveat">Real hourly ERA5 at one point per location ('
             f'{yspan}); solar capacity factor from horizontal irradiance ×1.25; region-default '
-            'carbon and technology costs; reduced optimiser fidelity. Per-state figures are in '
-            '<code>figs/locations_h2/</code>.</div>')
+            'carbon and technology costs. Each site\'s solar and wind LCOE is re-anchored from the '
+            'calibration capacity factor to that site\'s real CF, so the optimiser builds wind '
+            'only where it is competitive (≈0 in the ~2%-CF sites). Reduced optimiser fidelity. '
+            'Per-state figures are in <code>figs/locations_h2/</code>.</div>')
     return "".join(out)
 
 
