@@ -345,6 +345,44 @@ GAS_H2 = GasParams(
     carbon_intensity_ocgt=0.0,
 )
 
+# ── Firm CLEAN baseload firming (geothermal / hydro) — v5.7, --firming geothermal|hydro ──
+# Some sites have a *firm, zero-carbon* resource that makes the whole solar/wind/battery/gas
+# question moot: just run the datacenter on it. Modelled exactly like the gas/H2 firming —
+# the "a power plant with X" trick the GAS_H2 preset already uses — but with **zero fuel and
+# zero carbon**, a high baseload capacity factor, and infrastructure-grade capital (long life,
+# low WACC). Used both as a `--firming` backup (zero-carbon firm support for an RE build) and,
+# via `gas_pure_lcoe(..., cf=...)`, as the standalone firm-clean delivered-cost baseline that
+# the EU-siting comparison ranks (tools/build_eu_siting.py). All figures are illustrative,
+# adjustable, and region-agnostic; cite the per-resource sources below.
+#
+# Geothermal (e.g. Iceland high-enthalpy volcanic): firm ~90% CF, no fuel, no combustion CO2.
+# Capex ≈ $4,500/kW, FOM ≈ $110/kW-yr, 30-yr life, 6% WACC (infrastructure) → ≈ $58/MWh at
+# CF 0.90. Sources: IRENA Renewable Power Generation Costs 2023; NREL ATB 2024 (geothermal
+# hydro/flash); Orkustofnun (Icelandic National Energy Authority).
+GEOTHERMAL = GasParams(
+    name="Geothermal (firm, zero-carbon)",
+    gas_price_mmbtu=0.0, ccgt_heat_rate=0.0, ocgt_heat_rate=0.0,   # no fuel
+    ccgt_capex_kw=4500.0, ocgt_capex_kw=4500.0,                    # firm baseload plant
+    ccgt_fom_kw_yr=110.0, ocgt_fom_kw_yr=110.0, vom_mwh=3.0,
+    carbon_intensity_ccgt=0.0, carbon_intensity_ocgt=0.0,
+    carbon_price_today=0.0, carbon_trajectory="linear",
+    lifetime_years=30, wacc=0.06,
+)
+# Reservoir / run-of-river hydro at an abundant, under-exploited site (e.g. Norway, the Alps):
+# cheap, firm-dispatchable, zero-carbon. Capex ≈ $2,800/kW, FOM ≈ $45/kW-yr, 40-yr life, 5%
+# WACC → ≈ $33/MWh at a firm CF 0.85. Caveat: a real reservoir is *energy-limited* (seasonal
+# inflow), so treating it as firm baseload is optimistic for a large load — defensible only
+# where hydro is abundant relative to the datacenter. Sources: IRENA 2023; IEA Hydropower 2021.
+HYDRO = GasParams(
+    name="Hydropower (firm, zero-carbon)",
+    gas_price_mmbtu=0.0, ccgt_heat_rate=0.0, ocgt_heat_rate=0.0,
+    ccgt_capex_kw=2800.0, ocgt_capex_kw=2800.0,
+    ccgt_fom_kw_yr=45.0, ocgt_fom_kw_yr=45.0, vom_mwh=2.0,
+    carbon_intensity_ccgt=0.0, carbon_intensity_ocgt=0.0,
+    carbon_price_today=0.0, carbon_trajectory="linear",
+    lifetime_years=40, wacc=0.05,
+)
+
 # ── Long-duration energy storage (LDES) presets — for the --ldes overlay ────────
 # A second storage tier the optimiser overlay can add ON TOP of LFP: LFP keeps doing
 # the cheap diurnal cycling, LDES soaks up multi-day RE *overcapacity* (otherwise
@@ -445,7 +483,8 @@ REGIONS = {
 
 # Firming-resource choice (CLI --firming). "gas" keeps the region's default natural
 # gas; "h2" swaps in green-hydrogen firming (zero-carbon, pricey fuel).
-FIRMING_PRESETS = {"gas": None, "h2": GAS_H2}   # None → region default gas
+FIRMING_PRESETS = {"gas": None, "h2": GAS_H2,   # None → region default gas
+                   "geothermal": GEOTHERMAL, "hydro": HYDRO}   # firm zero-carbon baseload
 
 
 # Resource-quality presets: (mean_irr [kWh/m²/day], mean_wind_ms). "default" is the

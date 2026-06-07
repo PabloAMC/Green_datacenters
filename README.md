@@ -243,6 +243,12 @@ Tables regenerable via `tools/regen_doc_tables.py` from `output/*_results.json`.
 
 For low-value/spot compute, shedding the most expensive hours helps a lot: in the `--flex-sweep` (EU 90% RE, 2030), a 95%-interruptible workload valued at $25/MWh sees delivered cost fall to ~$32/MWh (parity by 2025) versus ~$174/MWh fully firm. (The flex-sweep runs at reduced fidelity — coarser grid, wider bounds — so its firm corner reads above the §11 headline of ~$120; treat the *shape* of the trade-off, not the absolute, as the point.) Premium AI ($900/MWh) sheds nothing and stays firm.
 
+### Where in Europe to build (siting comparison)
+
+`tools/build_eu_siting.py` (`make eu-siting`) ranks candidate EU locations by the **cheapest 24/7 carbon-free delivered cost**, letting each site use its best clean resource: sun+wind sites build the gas-free solar+wind+battery+green-H₂ system (on **real ERA5** weather), while geothermal/hydro sites run on firm zero-carbon baseload (`--firming geothermal|hydro`). It writes a ranked bar chart (`figs/eu_siting.png`) and a **map** (`figs/eu_siting_map.png`, cartopy; falls back to a plain scatter if cartopy is absent).
+
+Headline (2030, delivered $/MWh): **firm clean baseload wins decisively** — Norway / Alpine **hydro ≈ $30** and Iceland **geothermal ≈ $58** beat the best build-it-yourself sun+wind sites and crush gas (EU ~$125). Among sun+wind sites the **Canary Islands (Lanzarote, ≈$104)** lead — steady NE trade winds (wind CF ≈0.42) plus strong sun — followed by windy **Jutland (≈$114)**; cloudier/calmer markets like Germany (≈$168) trail. *Caveat:* each sun+wind number reflects the exact ERA5 grid cell at the chosen lat/lon, so very localized wind regimes (e.g. the Tarifa jet) can be under-captured — treat the ranking as directional and re-fetch a precise point to site-tune.
+
 ---
 
 ## 📖 Glossary

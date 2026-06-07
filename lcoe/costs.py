@@ -312,11 +312,16 @@ def gas_cost_split(gas_frac: float, gas: GasParams, year_index: int, r: float,
     }
 
 
-def gas_pure_lcoe(gas: GasParams, year_index: int, r: float) -> float:
+def gas_pure_lcoe(gas: GasParams, year_index: int, r: float, cf: float = 0.85) -> float:
+    """Pure delivered LCOE of a stand-alone firm plant of this type at capacity factor `cf`.
+
+    The default cf=0.85 is the merchant-gas baseline. For a firm CLEAN baseload resource
+    (geothermal cf≈0.90, hydro cf≈0.85; fuel/heat-rate/carbon all 0) pass its own CF — this
+    is the standalone firm-clean delivered cost the EU-siting comparison ranks (§ siting)."""
     crf_g = crf(r, gas.lifetime_years)
     p_c   = carbon_price(gas, year_index)
-    return ((gas.ccgt_capex_kw * 1e3 * crf_g) / (8760 * 0.85)
-            + (gas.ccgt_fom_kw_yr * 1e3) / (8760 * 0.85)
+    return ((gas.ccgt_capex_kw * 1e3 * crf_g) / (8760 * cf)
+            + (gas.ccgt_fom_kw_yr * 1e3) / (8760 * cf)
             + gas.gas_price_mmbtu * gas.ccgt_heat_rate + gas.vom_mwh
             + p_c * gas.carbon_intensity_ccgt)
 

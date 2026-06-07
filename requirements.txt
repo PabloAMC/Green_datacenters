@@ -9,3 +9,12 @@ matplotlib>=3.7
 # Optional — nicer plot styling. The code falls back to a plain matplotlib
 # style automatically if this is not installed, so it is not required to run.
 # scienceplots>=2.1
+
+# Optional — the EU-siting MAP (tools/build_eu_siting.py) uses cartopy for
+# coastlines/borders. It falls back to a plain latitude-corrected lon/lat scatter
+# if cartopy is absent, so it is not required for the rest of the model. cartopy
+# downloads Natural Earth basemap data on first use (cached thereafter).
+# cartopy>=0.22
+# Optional — real ERA5 weather fetch (tools/fetch_era5.py, fetch_locations.py,
+# build_eu_siting.py --fetch); needs a CDS API key in ~/.cdsapirc.
+# cdsapi>=0.7 ; xarray>=2024.0 ; netcdf4>=1.6

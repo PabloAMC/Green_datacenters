@@ -223,6 +223,24 @@ def test_ldes_presets():
     assert set(m.LDES_PRESETS) == {"iron-air", "h2", "h2-cavern"}
 
 
+def test_firm_clean_firming_presets():
+    """Geothermal & hydro firming: firm, zero-carbon, no fuel, flat over time; cheap
+    delivered LCOE at their baseload CF; registered for --firming."""
+    assert m.GEOTHERMAL.carbon_intensity_ccgt == 0.0 and m.GEOTHERMAL.gas_price_mmbtu == 0.0
+    assert m.HYDRO.carbon_intensity_ccgt == 0.0 and m.HYDRO.gas_price_mmbtu == 0.0
+    geo = m.gas_pure_lcoe(m.GEOTHERMAL, 0, m.GEOTHERMAL.wacc, cf=0.90)
+    hyd = m.gas_pure_lcoe(m.HYDRO, 0, m.HYDRO.wacc, cf=0.85)
+    assert 45.0 < geo < 75.0, f"geothermal LCOE {geo:.1f} out of band"
+    assert 20.0 < hyd < 45.0, f"hydro LCOE {hyd:.1f} out of band"
+    # flat over time (no fuel/carbon escalation)
+    assert abs(geo - m.gas_pure_lcoe(m.GEOTHERMAL, 15, m.GEOTHERMAL.wacc, cf=0.90)) < 1e-6
+    # zero-carbon → cheaper than its carbon term would ever add; and cf param defaults to 0.85
+    assert m.FIRMING_PRESETS["geothermal"] is m.GEOTHERMAL
+    assert m.FIRMING_PRESETS["hydro"] is m.HYDRO
+    # gas_pure_lcoe default cf unchanged (backward-compat)
+    assert abs(m.gas_pure_lcoe(m.GAS, 0, m.GAS.wacc) - m.gas_pure_lcoe(m.GAS, 0, m.GAS.wacc, cf=0.85)) < 1e-9
+
+
 def test_h2_firming_preset():
     """Green-H2 firming: zero combustion carbon, pricier fuel, flat over time."""
     assert m.GAS_H2.carbon_intensity_ccgt == 0.0 and m.GAS_H2.carbon_intensity_ocgt == 0.0

@@ -47,6 +47,12 @@ locations-h2:     ## per-state fig1: self-made-H2 zero-carbon, no-wind vs with-w
 locations-re:     ## per-state fig1: gas-backed ~55% (no wind) vs ~80% (with wind); needs output/era5/*.npz
 	$(PYTHON) tools/build_locations_re.py
 
+eu-siting:        ## rank EU sites by cheapest 24/7 carbon-free power (sun+wind / geothermal / hydro)
+	$(PYTHON) tools/build_eu_siting.py
+
+eu-siting-fetch:  ## (re)fetch ERA5 for the EU-siting RE candidates; needs a CDS key
+	$(PYTHON) tools/build_eu_siting.py --fetch
+
 solar-only:
 	$(PYTHON) tools/build_solar_only.py
 

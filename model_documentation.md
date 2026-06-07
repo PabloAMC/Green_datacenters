@@ -877,6 +877,37 @@ plots both delivered-cost trajectories: in the EU at 90% RE green-H₂ firming c
 ≈ +$24–40/MWh, a premium that **narrows over time** as the EU carbon price makes gas
 firming dearer (the pure-gas reference rises to cross the RE+H₂ delivered cost ≈ 2036).
 
+**Firm CLEAN baseload firming — geothermal & hydro (opt-in, `--firming geothermal|hydro`, v5.7).**
+The same "a power plant with X" trick extends to firm *zero-carbon* resources some sites enjoy:
+**geothermal** (e.g. Iceland) and **abundant hydro** (e.g. Norway, the Alps). Both reuse the
+gas cost formula with $\varepsilon_g=0$ and **zero fuel**, but with infrastructure-grade capital
+(long life, low WACC) and a high baseload CF — so they are firm, dispatchable, and clean.
+Standalone delivered cost (via `gas_pure_lcoe(·, cf)`): **geothermal ≈ \$58/MWh** at CF 0.90
+(\$4,500/kW, 30 yr, 6% WACC; IRENA 2023 / NREL ATB / Orkustofnun) and **hydro ≈ \$30/MWh** at
+CF 0.85 (\$2,800/kW, 40 yr, 5% WACC; IRENA / IEA Hydropower). *Caveat:* a real hydro reservoir
+is energy-limited (seasonal inflow), so treating it as firm baseload is optimistic except where
+hydro is abundant relative to the load. Both presets (`GEOTHERMAL`, `HYDRO`) are illustrative and
+adjustable, and feed the EU-siting comparison (§ below).
+
+### 7.2b Where to site in Europe — clean-power comparison (`tools/build_eu_siting.py`)
+
+A practical question the model can answer: *which EU locations give the cheapest 24/7
+carbon-free datacenter power?* `build_eu_siting.py` (`make eu-siting`) scores a curated set of
+candidate sites on **one metric — delivered firm zero-carbon \$/MWh** — letting each use its best
+clean resource: sun+wind sites build the gas-free solar+wind+LFP+green-H₂ system (§7.6) on **real
+ERA5** weather (re-anchoring the imported LCOE to the site CF, as in `build_locations`); geothermal
+and hydro sites run on the firm-clean baseload above. It emits a ranked bar chart
+(`figs/eu_siting.png`) and a **map** (`figs/eu_siting_map.png`; cartopy coastlines/borders, with a
+plain lon/lat-scatter fallback when cartopy is absent) plus `output/eu_siting_results.json`.
+
+**Result (2030, delivered \$/MWh, real ERA5 2018–2024):** firm clean baseload wins decisively —
+Norway / Alpine **hydro ≈ \$30** and Iceland **geothermal ≈ \$58** beat every build-it-yourself
+sun+wind site and sit far below gas (EU ~\$125). Among sun+wind sites the **Canary Islands
+(Lanzarote, ≈\$104)** lead on steady trade winds (wind CF ≈0.42) + strong sun, then windy
+**Jutland (≈\$114)**; cloudy/calm markets (Germany ≈\$168) trail. Each sun+wind figure reflects
+the exact ERA5 grid cell at the chosen lat/lon, so very localized wind regimes (e.g. the Tarifa
+jet) can be under-captured — the ranking is directional; re-fetch a precise point to site-tune.
+
 **Pure gas reference** (CCGT at 85% CF, verified values):
 
 | | US | EU 2025 | EU 2030 | EU 2035 |

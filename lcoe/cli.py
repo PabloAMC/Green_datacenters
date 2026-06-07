@@ -42,8 +42,8 @@ def build_arg_parser():
                    help="resource quality for a single-scenario run: conservative "
                         "default site, or a modern well-sited 'good' resource")
     p.add_argument("--firming", choices=list(FIRMING_PRESETS), default="gas",
-                   help="firming resource: 'gas' (default) or 'h2' (zero-carbon "
-                        "green-hydrogen turbine, pricey fuel)")
+                   help="firming resource: 'gas' (default), 'h2' (green-hydrogen turbine), "
+                        "or firm zero-carbon baseload 'geothermal' / 'hydro' (site-specific)")
     p.add_argument("--resource-sweep", action="store_true",
                    help="compare default vs good-site resource (LCOE + parity table)")
     p.add_argument("--tornado", action="store_true",
