@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, fields, replace
 
-MODEL_VERSION = "5.6.0"
+MODEL_VERSION = "5.7.0"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -19,8 +19,15 @@ class TechParams:
     learning_rate: float        # fractional cost reduction per doubling of capacity
     cumulative_gw_2025: float   # GW cumulative installed globally, base year
     annual_additions_gw: float  # GW added in 2025
-    additions_growth_rate: float
+    additions_growth_rate: float   # g0: growth of annual additions in year 1
     uncertainty_sigma: float = 0.15
+    # Deployment-trajectory decay (v5.7). The additions growth rate decays
+    # geometrically toward `additions_growth_floor` (g_i = floor+(g0-floor)·decay^(i-1))
+    # so cumulative capacity follows an S-curve rather than compounding forever. 1.0 =
+    # legacy constant growth (no decay), kept as the default so unset technologies are
+    # unchanged. See `costs.cumulative_capacity`.
+    additions_growth_decay: float = 1.0
+    additions_growth_floor: float = 0.0
     # Fraction of the (bundled) LCOE that is ongoing O&M rather than financed
     # capital — used only to split delivered cost into capex vs opex. Solar/wind
     # have no fuel, so LCOE ≈ capital recovery + fixed O&M; O&M is ~15–25% of LCOE.
@@ -59,6 +66,8 @@ class BatteryParams:
     cumulative_gwh_2025: float = 1800.0
     annual_additions_gwh: float = 600.0
     additions_growth_rate: float = 0.18
+    additions_growth_decay: float = 1.0   # v5.7 S-curve decay (1.0 = legacy constant growth)
+    additions_growth_floor: float = 0.0
     roundtrip_efficiency: float = 0.924   # DC-DC LFP; sqrt each way ≈ 96.1%
     om_frac_capex: float = 0.015
     # Degradation (LFP Wöhler curve)
@@ -227,6 +236,15 @@ class SystemParams:
     # "cooling" adds a temperature-driven PUE overhead so peak load > average and firm
     # gas backup (sized to peak) is modestly larger (§5.7).
     load_profile: str = "flat"
+    # Firm gas-plant capacity sizing. The firm backup is sized to the peak hourly
+    # residual; "mean" (default, unchanged headline) sizes to the mean-across-weather-years
+    # annual peak, "p90" sizes to the 1-in-10 (P90) annual peak — a more conservative
+    # "never goes dark" sizing that slightly raises gas capex. Energy/fuel unaffected.
+    firm_gas_sizing: str = "mean"
+    # Solar system performance ratio. 1.0 (default) keeps the simulated solar CF anchored
+    # to the imported-LCOE cost basis (mean_irr/24; the v5.5 CF-consistency invariant);
+    # <1.0 derates toward a bottom-up specific-yield CF (then re-level the solar LCOE).
+    solar_performance_ratio: float = 1.0
 
 
 # ── Workload presets ──────────────────────────────────────────────────────────
@@ -268,20 +286,32 @@ WORKLOAD_PRESETS = {
 # wind ≈0.28 — inside Lazard's CF bands — so the imported $/MWh and the simulated MWh
 # now refer to the same plant. (Pre-v5.5 the dispatch ran at ~0.15/0.22, ~½ the CF the
 # LCOE assumed, overstating overbuild and biasing high-RE cost upward.)
+# DEPLOYMENT TRAJECTORY (v5.7). Additions grow off the 2025 base with a *decaying*
+# growth rate (S-curve), not constant compounding. The central path is a best guess that
+# keeps near-term additions robust — driven by developing-world electrification and the
+# AI-datacenter clean-power buildout — but lets growth taper as mature markets saturate
+# and grid-integration limits bite. It lands solar ≈15.6 TW, wind ≈4.2 TW, batteries
+# ≈14.5 TWh cumulative by 2040 (vs the old constant-growth 38 TW / 7 TW / 45 TWh, which
+# were ~3-4× mainstream IEA WEO / BNEF NEO and pulled deep-future RE cost down too fast).
+# decay/floor are documented in §3; a low/central/high band is tabulated there too.
 SOLAR = TechParams("Solar PV", lcoe_today=52.0, learning_rate=0.30,
                    cumulative_gw_2025=2900.0, annual_additions_gw=650.0,
-                   additions_growth_rate=0.15, om_frac_lcoe=0.15)
+                   additions_growth_rate=0.06, additions_growth_decay=0.85,
+                   om_frac_lcoe=0.15)
 
 WIND = TechParams("Onshore Wind", lcoe_today=50.0, learning_rate=0.17,
                   cumulative_gw_2025=1300.0, annual_additions_gw=167.0,
-                  additions_growth_rate=0.10, om_frac_lcoe=0.25, life_yr=25)
+                  additions_growth_rate=0.03, additions_growth_decay=0.85,
+                  om_frac_lcoe=0.25, life_yr=25)
 
 # Energy component identical across regions (globally traded LFP cells); EU
 # carries a ~25% power/BOS/EPC soft-cost premium (higher labour/permitting, no
 # IRA-equivalent manufacturing credit). EU is therefore modestly MORE expensive
 # than the US — the opposite of the v4 assumption.
-BATTERY_US = BatteryParams("LFP Battery (US)", capex_kwh_today=180.0, capex_kw_today=140.0)
-BATTERY_EU = BatteryParams("LFP Battery (EU)", capex_kwh_today=180.0, capex_kw_today=175.0)
+BATTERY_US = BatteryParams("LFP Battery (US)", capex_kwh_today=180.0, capex_kw_today=140.0,
+                           additions_growth_rate=0.08, additions_growth_decay=0.85)
+BATTERY_EU = BatteryParams("LFP Battery (EU)", capex_kwh_today=180.0, capex_kw_today=175.0,
+                           additions_growth_rate=0.08, additions_growth_decay=0.85)
 
 GAS = GasParams(name="Gas Backup (US)", gas_price_mmbtu=4.0,
                 carbon_price_today=0.0, carbon_trajectory="linear")
@@ -377,10 +407,12 @@ LDES_PRESETS = {"iron-air": LDES_IRONAIR, "h2": LDES_H2, "h2-cavern": LDES_H2_CA
 
 SOLAR_EU = TechParams("Solar PV (EU)", lcoe_today=60.0, learning_rate=0.30,
                       cumulative_gw_2025=2900.0, annual_additions_gw=650.0,
-                      additions_growth_rate=0.15, om_frac_lcoe=0.15)
+                      additions_growth_rate=0.06, additions_growth_decay=0.85,
+                      om_frac_lcoe=0.15)
 WIND_EU  = TechParams("Onshore Wind (EU)", lcoe_today=48.0, learning_rate=0.17,
                       cumulative_gw_2025=1300.0, annual_additions_gw=167.0,
-                      additions_growth_rate=0.10, om_frac_lcoe=0.25, life_yr=25)
+                      additions_growth_rate=0.03, additions_growth_decay=0.85,
+                      om_frac_lcoe=0.25, life_yr=25)
 
 SMR    = SMRParams()
 SMR_EU = SMRParams(name="SMR (EU)", lcoe_foak=140.0, lcoe_noak=85.0, years_to_noak=12)

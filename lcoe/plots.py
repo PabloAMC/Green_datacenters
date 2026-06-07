@@ -100,6 +100,9 @@ def plot_cost_trajectories(results, region="US"):
                                      col, f"{R:.0%}")
     _place_crossings(ax, crossings)
     ax.plot(yrs, results["gas_pure"], color=C_GAS, lw=2, ls="--", label=results["gas_name"])
+    if "gas_stress" in results:
+        ax.plot(yrs, results["gas_stress"], color=C_GAS, lw=1.3, ls=(0, (3, 1, 1, 1)),
+                alpha=0.7, label=results.get("gas_stress_name", "Gas (stressed fuel)"))
     ax.plot(yrs, results["lcoe_smr"], color=C_SMR, lw=2, ls="-.",
             label="Small modular reactor (nuclear)")
     if "grid_ppa" in results:

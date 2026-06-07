@@ -126,7 +126,7 @@ Workload presets (`--workload`): `firm` (always-on, 0% shed) · `enterprise` (5%
 
 ### 4. Run the US vs. EU Comparison Plot
 
-Regenerates the firm US-vs-Europe **70%-RE** trajectory against each region's gas baseline (and annotates any EU/gas crossover). EU 70% RE is already below gas from 2025, so no crossover point is drawn; the US 70% line crosses its much cheaper gas baseline only in the mid-2030s:
+Regenerates the firm US-vs-Europe **70%-RE** trajectory against each region's gas baseline (and annotates any EU/gas crossover). EU 70% RE is already below gas from 2025; the US 70% line, under the v5.7 deployment recalibration, **never crosses the flat $4/MMBtu US gas baseline within the horizon** (it bottoms at ≈$50/MWh) — it would cross only a stressed-gas baseline:
 
 ```bash
 PYTHONPATH=. python scratch/plot_comparison.py
@@ -223,19 +223,21 @@ So premium/AI workloads ($v_{\text{shed}}$ high) never shed and collapse to the 
 
 Tables regenerable via `tools/regen_doc_tables.py` from `output/*_results.json`. These are the relevant numbers for any valuable datacenter (premium/AI workloads never shed and collapse to firm). Gas baseline: US flat ~$46/MWh; EU rising from $114 (2025) to $163 (2040) as carbon prices climb. Simulated capacity factors: US solar 0.23 / wind 0.33, EU 0.16 / 0.29 — consistent with the Lazard CF basis of the imported LCOEs.
 
+> **v5.7 deployment recalibration.** Learning curves are now driven by an **S-curve** deployment trajectory (additions growth *decays*), landing solar ≈15.6 TW / wind ≈4.2 TW / batteries ≈14.5 TWh cumulative by 2040 — vs the old constant-growth 38 TW / 7 TW / 45 TWh that was ~3–4× mainstream IEA/BNEF and made deep-future RE too cheap. **2025 numbers and builds are unchanged** (only future unit costs rise). Net: deep-future RE costs lift ~25–40% at 2040, so **US high-RE no longer crosses cheap flat gas within the horizon** (the moat strengthens; RE wins only against the stressed-gas reference line), and **EU 90% parity shifts ~2029→~2030**. Directional conclusions unchanged.
+
 > **A firm, battery-only off-grid system tops out at ~94% RE** (≈0.94 EU / ≈0.95 US over the whole build grid): during a multi-day Dunkelflaute neither sun nor wind produces and a long battery can't deliver enough power to bridge days, so a few percent of annual energy always falls to gas. The suite therefore reports up to 90% RE; pushing higher needs long-duration storage or H₂ firming (the `--ldes` / `--firming h2` overlays and `fig6`). Requesting a target above the ceiling triggers an explicit infeasibility warning.
 
 > **On-grid reference.** Every trajectory/reliability figure and the summary also plot a **Grid + renewable-PPA** line — the realistic alternative of staying on the grid and signing a renewable PPA (all-in ≈ \$75/MWh US, \$117/MWh EU in 2025, declining with the solar learning curve). It sits *below* the off-grid high-RE optimum in both regions, making explicit that **going off-grid is itself a cost premium**. A second line, **Grid + 24/7 CFE**, adds a premium for hour-by-hour carbon-free matching (≈\$115/MWh US, \$172/MWh EU in 2025). Both are annual-vs-hourly reference lines — not part of the optimisation.
 
 ### US — 90% RE
 
-* **2025 LCOE:** $126.4/MWh; **2040:** $62.4/MWh. **Parity (90% RE): >2040.** But **70–80% RE reach parity ~2036**, and **85% ~2040**, as the CF-consistent build needs less overbuild.
-* *Why?* Extremely cheap, untaxed US gas (~$46/MWh even at a 9% WACC) is a moat clean energy still can't cross within the horizon at *high* RE fractions, where heavy wind overbuild is needed for multi-day lulls.
+* **2025 LCOE:** $126.4/MWh; **2040:** $77.6/MWh. **Parity: >2040 at every RE target** (70% bottoms at ≈$50/MWh — above the $46 flat-gas baseline).
+* *Why?* Extremely cheap, untaxed US gas (~$46/MWh even at a 9% WACC) is a moat clean energy can't cross within the horizon — and the v5.7 deployment recalibration (less-aggressive late-horizon learning) *widens* it, removing the moderate-RE mid-2030s crossings of earlier versions. US RE wins only against the **stressed-gas** reference (×1.6 fuel ≈$62/MWh), which 70% RE beats by ~2030 — i.e. competitiveness hinges on gas not staying at $4.
 
 ### Europe — 90% RE
 
-* **2025 LCOE:** $156.1/MWh; **2040:** $88.0/MWh. **Parity: ~2029** (70–80% RE reach parity ~2025; **85% ~2026**).
-* *Why?* Expensive, carbon-taxed EU gas makes RE competitive — and with a CF-consistent resource the always-on build that rides out week-long Dunkelflaute reaches 90% parity by the **late 2020s**.
+* **2025 LCOE:** $156.1/MWh; **2040:** $106.5/MWh. **Parity: ~2030** (70–80% RE reach parity ~2025; **85% ~2026**).
+* *Why?* Expensive, carbon-taxed EU gas makes RE competitive — and with a CF-consistent resource the always-on build that rides out week-long Dunkelflaute reaches 90% parity by ~2030 (v5.7 nudges this a year later than the pre-recalibration ~2029, but rising EU carbon still does most of the work).
 
 ### If the compute is cheap (interruptible)
 
