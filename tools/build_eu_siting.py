@@ -187,7 +187,7 @@ def build_map(results, mi):
     cmap = plt.get_cmap("RdYlGn_r")
     norm = plt.Normalize(vmin, vmax)
     marker = {"re": "o", "geothermal": "^", "hydro": "s"}
-    extent = [-25, 30, 28, 67]   # Iceland → E. Mediterranean
+    extent = [-25, 30, 28, 69]   # Iceland → E. Mediterranean (north headroom for Nordic sites)
 
     try:
         import cartopy.crs as ccrs
@@ -233,8 +233,11 @@ def build_map(results, mi):
                       markeredgecolor="k", markersize=12, label="Geothermal (firm)"),
                Line2D([0], [0], marker="s", color="w", markerfacecolor="#999",
                       markeredgecolor="k", markersize=11, label="Hydro (firm)")]
-    ax.legend(handles=handles, loc="upper right", fontsize=8.5, frameon=True,
-              facecolor="white", framealpha=1, title="Clean resource")
+    # Legend BELOW the map (a box in the upper-right would occlude the Nordic markers,
+    # e.g. Sweden at ~64.5°N/18°E).
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.04), ncol=3,
+              fontsize=8.5, frameon=True, facecolor="white", framealpha=1,
+              title="Clean resource", title_fontsize=9)
     real = any(r.get("weather", "").startswith("ERA5") for r in results)
     ax.set_title(f"Where to site a zero-carbon EU datacenter — delivered firm clean power, {mi}\n"
                  f"({'real ERA5 weather' if real else 'illustrative resource'}; "
