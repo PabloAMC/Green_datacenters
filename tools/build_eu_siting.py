@@ -71,11 +71,13 @@ CANDIDATES = [
     ("Spain (Madrid)", "spain", "re", 5.0, 6.2, 40.0, -3.7, None,
      "reference: central Spain (reuses committed ERA5)"),
     # ── Firm zero-carbon baseload ────────────────────────────────────────────────
-    ("Iceland (geothermal)", "iceland", "geothermal", 2.2, 8.0, 64.1, -21.9, 0.90,
+    ("Iceland (geothermal)", "iceland", "geothermal", 2.2, 8.0, 64.1, -21.9, 0.88,
      "firm high-enthalpy geothermal — runs 24/7, no overbuild needed"),
-    ("Norway (hydro)", "norway_hydro", "hydro", 2.5, 6.0, 61.0, 7.0, 0.85,
+    ("Norway (hydro)", "norway_hydro", "hydro", 2.5, 6.0, 61.0, 7.0, 0.55,
      "abundant reservoir hydro — cheap firm dispatchable clean power"),
-    ("Austrian Alps (hydro)", "austria_alps", "hydro", 3.2, 4.5, 47.3, 13.2, 0.85,
+    ("Sweden (Norrland hydro)", "sweden_hydro", "hydro", 2.4, 6.5, 64.5, 18.0, 0.55,
+     "abundant northern (Norrland) reservoir hydro — ~40% of Swedish generation"),
+    ("Austrian Alps (hydro)", "austria_alps", "hydro", 3.2, 4.5, 47.3, 13.2, 0.55,
      "Alpine reservoir/run-of-river hydro"),
 ]
 

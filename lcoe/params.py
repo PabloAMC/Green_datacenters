@@ -355,29 +355,35 @@ GAS_H2 = GasParams(
 # the EU-siting comparison ranks (tools/build_eu_siting.py). All figures are illustrative,
 # adjustable, and region-agnostic; cite the per-resource sources below.
 #
-# Geothermal (e.g. Iceland high-enthalpy volcanic): firm ~90% CF, no fuel, no combustion CO2.
-# Capex ≈ $4,500/kW, FOM ≈ $110/kW-yr, 30-yr life, 6% WACC (infrastructure) → ≈ $58/MWh at
-# CF 0.90. Sources: IRENA Renewable Power Generation Costs 2023; NREL ATB 2024 (geothermal
-# hydro/flash); Orkustofnun (Icelandic National Energy Authority).
+# SOURCED to IRENA, Renewable Power Generation Costs in 2023 (Sep 2024): capex is IRENA's
+# 2023 global weighted-average total installed cost; CF from IRENA (geothermal 2024 ≈ 88%).
+# LCOE is then computed through the model's OWN per-tech WACC (for a fair head-to-head with the
+# renewables it is ranked against), so it lands modestly BELOW IRENA's published LCOE — which is
+# quoted at IRENA's higher (~7.5%) WACC — as a cross-check (see the comment per resource).
+#
+# Geothermal (e.g. Iceland high-enthalpy volcanic): firm baseload, no fuel, no combustion CO2.
+# Capex $4,589/kW (IRENA 2023), FOM ≈ $130/kW-yr (NREL ATB 2024), CF 0.88 (IRENA 2024), 30-yr
+# life, 6% WACC → ≈ $63/MWh. Cross-check: IRENA's published 2023 LCOE is $71/MWh (at ~7.5% WACC).
 GEOTHERMAL = GasParams(
     name="Geothermal (firm, zero-carbon)",
     gas_price_mmbtu=0.0, ccgt_heat_rate=0.0, ocgt_heat_rate=0.0,   # no fuel
-    ccgt_capex_kw=4500.0, ocgt_capex_kw=4500.0,                    # firm baseload plant
-    ccgt_fom_kw_yr=110.0, ocgt_fom_kw_yr=110.0, vom_mwh=3.0,
+    ccgt_capex_kw=4589.0, ocgt_capex_kw=4589.0,                    # IRENA 2023 installed cost
+    ccgt_fom_kw_yr=130.0, ocgt_fom_kw_yr=130.0, vom_mwh=3.0,
     carbon_intensity_ccgt=0.0, carbon_intensity_ocgt=0.0,
     carbon_price_today=0.0, carbon_trajectory="linear",
     lifetime_years=30, wacc=0.06,
 )
-# Reservoir / run-of-river hydro at an abundant, under-exploited site (e.g. Norway, the Alps):
-# cheap, firm-dispatchable, zero-carbon. Capex ≈ $2,800/kW, FOM ≈ $45/kW-yr, 40-yr life, 5%
-# WACC → ≈ $33/MWh at a firm CF 0.85. Caveat: a real reservoir is *energy-limited* (seasonal
-# inflow), so treating it as firm baseload is optimistic for a large load — defensible only
-# where hydro is abundant relative to the datacenter. Sources: IRENA 2023; IEA Hydropower 2021.
+# Reservoir / run-of-river hydro at an abundant site (e.g. Norway, Sweden, the Alps): firm-
+# dispatchable, zero-carbon. Capex $2,806/kW (IRENA 2023), FOM ≈ $50/kW-yr, CF 0.55, 40-yr life,
+# 5% WACC → ≈ $46/MWh. The CF (0.55) is the key, honest lever: a real reservoir is energy-limited
+# (seasonal inflow), so it cannot run flat-out as a firm baseload — 0.55 is closer to real hydro
+# operation than a 0.85 "always-on" assumption (which would give an over-optimistic ~$30). LCOE is
+# then in line with IRENA's published 2023 hydro LCOE of $57/MWh (the small gap is the lower WACC).
 HYDRO = GasParams(
     name="Hydropower (firm, zero-carbon)",
     gas_price_mmbtu=0.0, ccgt_heat_rate=0.0, ocgt_heat_rate=0.0,
-    ccgt_capex_kw=2800.0, ocgt_capex_kw=2800.0,
-    ccgt_fom_kw_yr=45.0, ocgt_fom_kw_yr=45.0, vom_mwh=2.0,
+    ccgt_capex_kw=2806.0, ocgt_capex_kw=2806.0,                    # IRENA 2023 installed cost
+    ccgt_fom_kw_yr=50.0, ocgt_fom_kw_yr=50.0, vom_mwh=2.0,
     carbon_intensity_ccgt=0.0, carbon_intensity_ocgt=0.0,
     carbon_price_today=0.0, carbon_trajectory="linear",
     lifetime_years=40, wacc=0.05,

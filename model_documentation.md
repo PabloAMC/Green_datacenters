@@ -882,12 +882,15 @@ The same "a power plant with X" trick extends to firm *zero-carbon* resources so
 **geothermal** (e.g. Iceland) and **abundant hydro** (e.g. Norway, the Alps). Both reuse the
 gas cost formula with $\varepsilon_g=0$ and **zero fuel**, but with infrastructure-grade capital
 (long life, low WACC) and a high baseload CF — so they are firm, dispatchable, and clean.
-Standalone delivered cost (via `gas_pure_lcoe(·, cf)`): **geothermal ≈ \$58/MWh** at CF 0.90
-(\$4,500/kW, 30 yr, 6% WACC; IRENA 2023 / NREL ATB / Orkustofnun) and **hydro ≈ \$30/MWh** at
-CF 0.85 (\$2,800/kW, 40 yr, 5% WACC; IRENA / IEA Hydropower). *Caveat:* a real hydro reservoir
-is energy-limited (seasonal inflow), so treating it as firm baseload is optimistic except where
-hydro is abundant relative to the load. Both presets (`GEOTHERMAL`, `HYDRO`) are illustrative and
-adjustable, and feed the EU-siting comparison (§ below).
+Standalone delivered cost (via `gas_pure_lcoe(·, cf)`), **sourced to IRENA *Renewable Power
+Generation Costs in 2023*** (installed cost) and computed through the model's own per-tech WACC:
+**geothermal ≈ \$63/MWh** (\$4,589/kW, CF 0.88, FOM \$130/kW-yr, 30 yr, 6% WACC) and **hydro ≈
+\$46/MWh** (\$2,806/kW, CF 0.55, 40 yr, 5% WACC). These land just below IRENA's *published* 2023
+LCOEs (\$71 geothermal / \$57 hydro, quoted at IRENA's ~7.5% WACC) — the gap is the lower cost of
+capital, the same `rewacc`-style consistency the model applies to the imported Lazard LCOEs.
+*Caveat:* the hydro CF (0.55, not an "always-on" 0.85) reflects that a real reservoir is
+energy-limited (seasonal inflow); 0.85 would give an over-optimistic ~\$30. Both presets
+(`GEOTHERMAL`, `HYDRO`) remain adjustable, and feed the EU-siting comparison (§ below).
 
 ### 7.2b Where to site in Europe — clean-power comparison (`tools/build_eu_siting.py`)
 
@@ -901,12 +904,12 @@ and hydro sites run on the firm-clean baseload above. It emits a ranked bar char
 plain lon/lat-scatter fallback when cartopy is absent) plus `output/eu_siting_results.json`.
 
 **Result (2030, delivered \$/MWh, real ERA5 2018–2024):** firm clean baseload wins decisively —
-Norway / Alpine **hydro ≈ \$30** and Iceland **geothermal ≈ \$58** beat every build-it-yourself
-sun+wind site and sit far below gas (EU ~\$125). Among sun+wind sites the **Canary Islands
-(Lanzarote, ≈\$104)** lead on steady trade winds (wind CF ≈0.42) + strong sun, then windy
-**Jutland (≈\$114)**; cloudy/calm markets (Germany ≈\$168) trail. Each sun+wind figure reflects
-the exact ERA5 grid cell at the chosen lat/lon, so very localized wind regimes (e.g. the Tarifa
-jet) can be under-captured — the ranking is directional; re-fetch a precise point to site-tune.
+Nordic/Alpine **hydro ≈ \$46** (Norway, Sweden, the Alps) and Iceland **geothermal ≈ \$63** beat
+every build-it-yourself sun+wind site and sit far below gas (EU ~\$125). Among sun+wind sites the
+**Canary Islands (Lanzarote, ≈\$104)** lead on steady trade winds (wind CF ≈0.42) + strong sun,
+then windy **Jutland (≈\$114)**; cloudy/calm markets (Germany ≈\$168) trail. Each sun+wind figure
+reflects the exact ERA5 grid cell at the chosen lat/lon, so very localized wind regimes (e.g. the
+Tarifa jet) can be under-captured — the ranking is directional; re-fetch a precise point to site-tune.
 
 **Pure gas reference** (CCGT at 85% CF, verified values):
 

@@ -290,6 +290,48 @@ def wind_section():
     return "".join(blocks)
 
 
+def siting_section():
+    """'Where in Europe to build' — the EU clean-power siting comparison
+    (output/eu_siting_results.json + figs/eu_siting_map.png, eu_siting.png from
+    tools/build_eu_siting.py). Empty if not built."""
+    sp = os.path.join(ROOT, "output", "eu_siting_results.json")
+    mapfig, barfig = _img("eu_siting_map.png"), _img("eu_siting.png")
+    if not os.path.exists(sp) or not mapfig:
+        return ""
+    d = json.load(open(sp)); yr = d["ranking_year"]
+    j = yr - 2025
+    res_label = {"re": "solar + wind + battery + green-H₂", "geothermal": "geothermal (firm)",
+                 "hydro": "hydro (firm)"}
+    rows = sorted(d["sites"], key=lambda r: r["delivered"][j])
+    body = "".join(
+        f"<tr><th>{r['label']}</th><td>{res_label[r['resource']]}</td>"
+        f"<td class='cx'>${r['delivered'][j]:.0f}</td></tr>" for r in rows)
+    table = ("<table><thead><tr><th>Location</th><th>Cheapest clean resource</th>"
+             f"<th>{yr} $/MWh</th></tr></thead><tbody>{body}</tbody></table>")
+    src = "real ERA5 weather" if d.get("weather") == "real ERA5" else "illustrative resource"
+    cheapest = rows[0]
+    return (
+        '<h2>Where in Europe should you build?</h2>'
+        '<p>The same model can rank <b>candidate locations</b> by the cheapest <b>24/7 '
+        'carbon-free</b> delivered power, letting each site use its <b>best clean resource</b>: '
+        'sunny/windy sites build the gas-free solar + wind + battery + green-hydrogen system; '
+        'sites with firm zero-carbon resources — <b>geothermal</b> (Iceland) or abundant '
+        '<b>hydro</b> (Norway, Sweden, the Alps) — simply run on that.</p>'
+        f'<p><b>Firm clean baseload wins decisively.</b> Nordic/Alpine <b>hydro (~${cheapest["delivered"][j]:.0f}/MWh)</b> '
+        'and Icelandic <b>geothermal (~$58)</b> beat every build-it-yourself sun-and-wind site '
+        'and sit far below gas. Among sun + wind sites the <b>Canary Islands</b> lead (steady '
+        'trade winds + strong sun), then windy <b>Jutland</b>; cloudy/calm markets like Germany '
+        f'trail. ({yr}, firm · {src}.)</p>'
+        + _fig_box(mapfig) + table +
+        (_fig_box(barfig) if barfig else "") +
+        '<p class="sub" style="font-size:13px">Each sun + wind figure reflects the exact ERA5 grid '
+        'cell at the site\'s coordinates, so very localized wind regimes (e.g. the Tarifa jet) can '
+        'be under-captured — treat the ranking as directional. Geothermal/hydro costs are sourced '
+        'to IRENA 2023 installed costs ($4,589/kW geothermal, $2,806/kW hydro) computed at the '
+        'model\'s own WACC — just below IRENA\'s published LCOEs ($71 / $57); hydro uses CF 0.55 '
+        '(reservoirs are energy-limited). From <code>tools/build_eu_siting.py</code>.</p>')
+
+
 def assumptions_table(us, eu):
     uc, ec = us["simulated_cf"], eu["simulated_cf"]
     rows = [
@@ -432,6 +474,8 @@ first year the build's delivered cost drops below the gas baseline.</p>
 
 {wind_section}
 
+{siting_section}
+
 <h2>Key assumptions</h2>
 {assumptions}
 <p class="sub" style="font-size:13.5px">All in real 2025 USD. Costs fall over time via
@@ -471,6 +515,7 @@ def main():
         assumptions=assumptions_table(us, eu),
         locations_section=locations_section(),
         wind_section=wind_section(),
+        siting_section=siting_section(),
         version=MODEL_VERSION,
         commit=prov.get("git_commit", "—"),
         cfg=prov.get("config_sha256", "—"),

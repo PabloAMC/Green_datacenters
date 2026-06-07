@@ -228,12 +228,14 @@ def test_firm_clean_firming_presets():
     delivered LCOE at their baseload CF; registered for --firming."""
     assert m.GEOTHERMAL.carbon_intensity_ccgt == 0.0 and m.GEOTHERMAL.gas_price_mmbtu == 0.0
     assert m.HYDRO.carbon_intensity_ccgt == 0.0 and m.HYDRO.gas_price_mmbtu == 0.0
-    geo = m.gas_pure_lcoe(m.GEOTHERMAL, 0, m.GEOTHERMAL.wacc, cf=0.90)
-    hyd = m.gas_pure_lcoe(m.HYDRO, 0, m.HYDRO.wacc, cf=0.85)
-    assert 45.0 < geo < 75.0, f"geothermal LCOE {geo:.1f} out of band"
-    assert 20.0 < hyd < 45.0, f"hydro LCOE {hyd:.1f} out of band"
+    geo = m.gas_pure_lcoe(m.GEOTHERMAL, 0, m.GEOTHERMAL.wacc, cf=0.88)
+    hyd = m.gas_pure_lcoe(m.HYDRO, 0, m.HYDRO.wacc, cf=0.55)
+    # IRENA 2023 capex; LCOE at the model's own WACC sits just below IRENA's published
+    # LCOE ($71 geothermal / $57 hydro, at IRENA's ~7.5% WACC).
+    assert 55.0 < geo < 72.0, f"geothermal LCOE {geo:.1f} out of band"
+    assert 40.0 < hyd < 58.0, f"hydro LCOE {hyd:.1f} out of band"
     # flat over time (no fuel/carbon escalation)
-    assert abs(geo - m.gas_pure_lcoe(m.GEOTHERMAL, 15, m.GEOTHERMAL.wacc, cf=0.90)) < 1e-6
+    assert abs(geo - m.gas_pure_lcoe(m.GEOTHERMAL, 15, m.GEOTHERMAL.wacc, cf=0.88)) < 1e-6
     # zero-carbon → cheaper than its carbon term would ever add; and cf param defaults to 0.85
     assert m.FIRMING_PRESETS["geothermal"] is m.GEOTHERMAL
     assert m.FIRMING_PRESETS["hydro"] is m.HYDRO
