@@ -52,29 +52,36 @@ ERA5_YEARS = list(range(2018, 2025))   # 7 ERA5 years for the RE candidates
 
 # label, slug, resource ∈ {"re","geothermal","hydro"}, illustrative GHI (kWh/m²/day),
 # wind (m/s), lat, lon, baseload-CF (geothermal/hydro only), note.
-# All in the EU cost region (EU tech/battery WACC). Coordinates are a representative point.
+# CONCRETE named points (a real plant/site, not a country centroid). All priced in the EU
+# cost region (EU tech/battery WACC). RE sites are scored on REAL ERA5 at the grid cell of
+# these coordinates; firm geothermal/hydro use the resource LCOE (weather-independent).
 CANDIDATES = [
-    # ── Sun + wind (gas-free RE + H₂) ────────────────────────────────────────────
-    ("Canary Is. (Lanzarote)", "canary_lanzarote", "re", 5.8, 8.0, 29.0, -13.6, None,
+    # ── Sun + wind (gas-free RE + H₂; real ERA5) ─────────────────────────────────
+    ("Lanzarote (Canary Is.)", "canary_lanzarote", "re", 5.8, 8.0, 29.0, -13.6, None,
      "subtropical sun + steady NE trade winds — the standout sun-and-wind combo"),
-    ("Tarifa (Gibraltar Strait)", "tarifa", "re", 5.2, 8.5, 36.0, -5.6, None,
+    ("Tarifa (Str. of Gibraltar)", "tarifa", "re", 5.2, 8.5, 36.0, -5.6, None,
      "strongest mainland-EU wind (Levante/Poniente) + strong sun"),
-    ("Crete (S. Aegean)", "crete", "re", 5.2, 6.8, 35.3, 25.1, None,
+    ("Dover Strait (Pas-de-Calais)", "dover_strait", "re", 2.9, 8.2, 50.95, 1.45, None,
+     "English Channel: strong, steady wind to complement S-England/N-France solar"),
+    ("Heraklion (Crete)", "crete", "re", 5.2, 6.8, 35.3, 25.1, None,
      "high sun + Aegean meltemi wind"),
-    ("Sicily", "sicily", "re", 5.0, 5.5, 37.3, 14.1, None, "high Mediterranean sun"),
-    ("S. Portugal (Sines)", "portugal_sines", "re", 5.0, 6.8, 37.9, -8.8, None,
+    ("Gela (Sicily)", "sicily", "re", 5.0, 5.5, 37.3, 14.1, None, "high Mediterranean sun"),
+    ("Sines (S. Portugal)", "portugal_sines", "re", 5.0, 6.8, 37.9, -8.8, None,
      "Atlantic sun + coastal wind"),
-    ("Jutland (Denmark)", "jutland", "re", 2.8, 9.0, 56.5, 8.2, None,
+    ("Thisted (NW Jutland)", "jutland", "re", 2.8, 9.0, 56.5, 8.2, None,
      "North Sea wind, weak sun — wind-dominated"),
-    # ── Firm zero-carbon baseload ────────────────────────────────────────────────
-    ("Iceland (geothermal)", "iceland", "geothermal", 2.2, 8.0, 64.1, -21.9, 0.88,
-     "firm high-enthalpy geothermal — runs 24/7, no overbuild needed"),
-    ("Norway (hydro)", "norway_hydro", "hydro", 2.5, 6.0, 61.0, 7.0, 0.55,
-     "abundant reservoir hydro — cheap firm dispatchable clean power"),
-    ("Sweden (Norrland hydro)", "sweden_hydro", "hydro", 2.4, 6.5, 64.5, 18.0, 0.55,
-     "abundant northern (Norrland) reservoir hydro — ~40% of Swedish generation"),
-    ("Austrian Alps (hydro)", "austria_alps", "hydro", 3.2, 4.5, 47.3, 13.2, 0.55,
-     "Alpine reservoir/run-of-river hydro"),
+    # ── Firm zero-carbon baseload (concrete plants/sites) ────────────────────────
+    ("Hellisheiði (Iceland)", "iceland", "geothermal", 2.2, 8.0, 64.04, -21.40, 0.88,
+     "Hellisheiði geothermal station — firm high-enthalpy, runs 24/7, no overbuild"),
+    ("Aurland (W. Norway)", "norway_hydro", "hydro", 2.5, 6.0, 60.9, 7.19, 0.55,
+     "Sognefjord reservoir hydro — cheap firm dispatchable clean power"),
+    ("Harsprånget (Lule River, SE)", "sweden_hydro", "hydro", 2.4, 6.5, 66.03, 19.73, 0.55,
+     "Sweden's largest hydro plant (Norrland) — abundant firm reservoir hydro"),
+    ("Kaprun (Hohe Tauern, AT)", "austria_alps", "hydro", 3.2, 4.5, 47.27, 12.76, 0.55,
+     "Alpine reservoir/pumped hydro"),
+    ("Buksefjord (Nuuk, Greenland)", "greenland", "hydro", 2.0, 5.5, 64.07, -50.68, 0.55,
+     "Greenland is hydro country (~800,000 GWh/yr potential), NOT high-enthalpy "
+     "geothermal like Iceland — only marginal low-T prospects (e.g. Tunu)"),
 ]
 
 COL = {"re": "#56B4E9", "geothermal": "#D55E00", "hydro": "#0072B2"}
@@ -216,13 +223,13 @@ def build_map(results, mi):
     cmap = plt.get_cmap("RdYlGn_r")
     norm = plt.Normalize(vmin, vmax)
     marker = {"re": "o", "geothermal": "^", "hydro": "s"}
-    extent = [-25, 30, 28, 69]   # Iceland → E. Mediterranean (north headroom for Nordic sites)
+    extent = [-54, 30, 28, 70]   # SW Greenland → E. Mediterranean (incl. Nuuk at −50.7°)
 
     try:
         import cartopy.crs as ccrs
         import cartopy.feature as cfeature
         proj = ccrs.PlateCarree()
-        fig = plt.figure(figsize=(9.5, 8.5))
+        fig = plt.figure(figsize=(13, 7.5))
         ax = plt.axes(projection=proj)
         ax.set_extent(extent, crs=proj)
         ax.add_feature(cfeature.OCEAN, facecolor="#EAF2F8")
@@ -233,7 +240,7 @@ def build_map(results, mi):
         have_map = True
     except Exception as e:   # noqa: BLE001  (cartopy/NE data absent → plain scatter)
         print(f"  [map] cartopy unavailable ({type(e).__name__}); plain lon/lat scatter.")
-        fig, ax = plt.subplots(figsize=(9.5, 8.5))
+        fig, ax = plt.subplots(figsize=(13, 7.5))
         ax.set_xlim(extent[0], extent[1]); ax.set_ylim(extent[2], extent[3])
         import math as _m
         ax.set_aspect(1.0 / _m.cos(_m.radians(48)))   # latitude aspect correction
