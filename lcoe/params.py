@@ -82,6 +82,11 @@ class BatteryParams:
     discharge_capex_kw: float = None   # $/kW discharge kit; None → same as capex_kw
     charge_power_mw: float = 1.0       # charge power, MW per MW-load (e.g. electrolyser)
     discharge_power_mw: float = 1.0    # discharge power, MW per MW-load (e.g. turbine)
+    # Asset life (yr) for amortising the LDES capital. None → fall back to the project
+    # lifetime (the conservative default for batteries). Set explicitly for long-lived
+    # civil-works storage (e.g. pumped hydro ~50 yr) so it isn't unfairly written off over
+    # the 20-yr project horizon. Honoured by the LDES cost paths (costs/h2system/analysis).
+    life_yr: int = None
 
 
 @dataclass
@@ -446,7 +451,32 @@ LDES_H2_CAVERN = BatteryParams(
     additions_growth_rate=0.12, roundtrip_efficiency=0.35,
     calendar_deg_per_yr=0.010, cycle_deg_per_fec=1e-5, om_frac_capex=0.03, wacc=0.08,
 )
-LDES_PRESETS = {"iron-air": LDES_IRONAIR, "h2": LDES_H2, "h2-cavern": LDES_H2_CAVERN}
+# (d) Pumped hydro storage (PHS) — the dominant grid storage worldwide and the cheap
+#     multi-day firming option where topography + (ideally existing) reservoirs allow, e.g.
+#     Switzerland, Italy, Spain, Portugal, Greece, Romania, Norway. A round-trip STORE (not
+#     a generator): pump water up with RE surplus, regenerate ~80% later through a reversible
+#     pump-turbine. Modelled in the LDES tier (firms RE; residual backstopped by green H2 so
+#     it stays zero-carbon). SOURCED to NREL ATB (2022–24) + DOE/PNNL Mongird et al. (2020):
+#     RTE 0.80 (range 70–87%); ~50-yr life (vs ~20 yr for batteries — credited via life_yr);
+#     all-in CAPEX $1,999–5,505/kW (range = site quality; the low end = EXISTING-reservoir
+#     sites, the "untapped" EU case). Decomposed (assumption, from the all-in $/kW) into a
+#     reversible powerhouse ~$1,200/kW (split pump $700 + turbine $500) and a cheap energy/
+#     reservoir component $60/kWh (existing-reservoir end). FOM ≈ $18/kW-yr → om_frac≈0.01.
+#     Mature civil works → no learning curve. Lazard's LCOS does NOT cover PHS (Li-ion-centric).
+LDES_PHS = BatteryParams(
+    name="Pumped hydro storage (PHS)",
+    capex_kwh_today=60.0,            # reservoir/energy, $/kWh (existing-reservoir EU end)
+    capex_kw_today=700.0,            # pump (charge) kit, $/kW
+    discharge_capex_kw=500.0,        # turbine (discharge) kit, $/kW (≈ $1,200/kW reversible)
+    charge_power_mw=1.0, discharge_power_mw=1.0,    # ~symmetric reversible pump-turbine
+    learning_rate=0.0,               # mature civil-works tech → flat (no learning curve)
+    cumulative_gwh_2025=1600.0, annual_additions_gwh=30.0, additions_growth_rate=0.05,
+    roundtrip_efficiency=0.80,       # Mongird 2020 central (range 70–87%)
+    calendar_deg_per_yr=0.003, cycle_deg_per_fec=1e-6, om_frac_capex=0.01,
+    wacc=0.055, life_yr=50,          # long-life infrastructure (amortised over 50 yr)
+)
+LDES_PRESETS = {"iron-air": LDES_IRONAIR, "h2": LDES_H2, "h2-cavern": LDES_H2_CAVERN,
+                "phs": LDES_PHS}
 
 
 SOLAR_EU = TechParams("Solar PV (EU)", lcoe_today=60.0, learning_rate=0.30,

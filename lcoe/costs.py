@@ -214,13 +214,15 @@ def ldes_annual_cost(ldes, storage_hours, capex_kwh, charge_capex_kw,
     """
     if storage_hours <= 0:
         return 0.0
+    # Amortise over the asset's own life when set (e.g. PHS ~50 yr), else the project life.
+    life = getattr(ldes, "life_yr", None) or n_yr
     energy_capex = storage_hours * capex_kwh * 1e3
     power_capex = charge_pow * charge_capex_kw * 1e3 + discharge_pow * discharge_capex_kw * 1e3
     cost_one = energy_capex + power_capex
     deg = ldes.calendar_deg_per_yr + ldes.cycle_deg_per_fec * effective_fec_per_day * 365
-    annuity = (1.0 - (1.0 + r) ** (-n_yr)) / r if r > 0 else float(n_yr)
+    annuity = (1.0 - (1.0 + r) ** (-life)) / r if r > 0 else float(life)
     npv = cost_one + deg * energy_capex * annuity
-    return npv * crf(r, n_yr) + cost_one * ldes.om_frac_capex
+    return npv * crf(r, life) + cost_one * ldes.om_frac_capex
 
 
 def h2_system_cost_split(C_sol, C_win, B_lfp, elec, H2, resid, efc, *,

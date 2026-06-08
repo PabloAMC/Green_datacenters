@@ -109,7 +109,9 @@ def h2_system_trajectory(solar, wind, battery, mean_irr, mean_wind_ms, sys, year
     e_capex = ldes.capex_kwh_today
     dis_capex = ldes.discharge_capex_kw if ldes.discharge_capex_kw is not None else ldes.capex_kw_today
     h2_buy_base = GAS_H2.gas_price_mmbtu * GAS_H2.ccgt_heat_rate + GAS_H2.vom_mwh
-    crf_l = crf(ldes.wacc, n); annuity = (1.0 - (1.0 + ldes.wacc) ** (-n)) / ldes.wacc
+    # Amortise the LDES store over its own asset life when set (PHS ~50 yr), else project life.
+    life_l = getattr(ldes, "life_yr", None) or n
+    crf_l = crf(ldes.wacc, life_l); annuity = (1.0 - (1.0 + ldes.wacc) ** (-life_l)) / ldes.wacc
 
     if weather_years is not None:
         sol2d = np.asarray([np.asarray(s, float) for s, _ in weather_years])

@@ -915,6 +915,20 @@ sites, not typical markets. Each sun+wind figure reflects the exact ERA5 grid ce
 lat/lon, so very localized wind regimes (e.g. the Tarifa jet) can be under-captured — the ranking is
 directional; re-fetch a precise point to site-tune.
 
+**Pumped-storage firming (v5.7).** The six countries with pumped-hydro topography (Spain, Portugal,
+Italy, Greece, Switzerland, Romania) firm their solar+wind with **PHS** (§7.5) instead of green H₂
+(hexagon markers on the map). The effect is large: the Mediterranean PHS sites fall to **Tarifa
+\$82, Heraklion/Crete \$86, Sines \$89, Gela/Sicily \$91** (2030, real ERA5) — well below the
+H₂-firmed sites (Lanzarote \$104, Jutland \$114, Dover \$116) and approaching the firm
+hydro (\$46) / geothermal (\$63) leaders. Most striking: **Crete and Sicily are *infeasible* at
+85% RE+gas** (too little wind for an 85%-variable-RE firm build) **yet become cheap, fully
+zero-carbon with PHS** — its 0.80 round-trip firms low-wind solar across multi-day gaps where green
+H₂ (0.35) and gas cannot economically. The converse also shows: **Switzerland (\$118) and Romania
+(\$121)** have the PHS topography but weaker local solar/wind, so PHS alone doesn't make them cheap —
+their real edge is firm *conventional* hydro generation, not RE+storage. So the model's verdict is
+nuanced and defensible: PHS is transformative **only where good RE *and* pumped-storage terrain
+coincide** — which is exactly the Iberian/Mediterranean sun + sierra combination.
+
 **Pure gas reference** (CCGT at 85% CF, verified values):
 
 | | US | EU 2025 | EU 2030 | EU 2035 |
@@ -986,6 +1000,26 @@ and is that cheaper than **buying** green H₂? The `--ldes` overlay answers thi
 genuine **2-storage chronological dispatch**: at the no-LDES optimal build, LFP keeps the
 diurnal cycle while self-produced H₂ charges from otherwise-curtailed surplus and discharges
 through multi-day Dunkelflaute.
+
+**Pumped hydro storage (PHS) — the `phs` LDES preset (v5.7).** PHS is the dominant grid
+storage worldwide and the cheap multi-day firming option wherever topography + (ideally
+existing) reservoirs allow — Switzerland, Italy, Spain, Portugal, Greece, Romania, Norway.
+Crucially it is a round-trip **store**, not a generator (pump water up with RE surplus,
+regenerate ~80% later through a reversible pump-turbine), so it lives in the LDES tier, *not*
+as a firm-clean generation preset. It is **sourced** to NREL ATB (2022–24) and DOE/PNNL
+Mongird et al. (2020): round-trip efficiency **0.80** (range 70–87%), all-in CAPEX
+**\$1,999–5,505/kW** (the range *is* the site quality; the low end = existing-reservoir sites,
+the "untapped" EU case), FOM **\$18/kW-yr**, durations 8–12 h; decomposed (an assumption, from
+the all-in \$/kW) into a reversible powerhouse ~\$1,200/kW (pump \$700 + turbine \$500) and a
+cheap energy/reservoir component \$60/kWh. Its **~50-yr life** (vs ~20 yr for batteries) is
+credited via a new `life_yr` field on `BatteryParams`, so the LDES cost path amortises PHS over
+50 yr rather than writing it off over the 20-yr project horizon (~29% cheaper annualised — a
+material, correct adjustment). **Lazard does not usefully cover PHS** — its storage analysis is
+lithium-ion-centric; the authoritative cost data is NREL ATB + PNNL/Mongird, and for the
+*untapped EU potential* specifically the JRC EU-PHS assessment and the ANU Global Pumped Hydro
+Atlas. Run via `--ldes phs` / `--ldes-joint phs`; it firms the six PHS-potential siting
+candidates (§7.2b). Because PHS's 0.80 round-trip beats green H₂'s ~0.35, far less RE overbuild
+is wasted, so RE+PHS is markedly cheaper than RE+H₂ where the topography exists (see §7.2b).
 
 **Tail handling — no blackouts, by assumption.** The firming turbine *always* has fuel: it
 burns self-produced H₂ when the store has it and **purchased green H₂ (market) otherwise**.

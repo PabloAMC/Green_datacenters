@@ -215,12 +215,29 @@ def test_dispatch_h2_vec_residual_falls_with_capacity():
     assert 0.0 <= big <= small <= 1.0 and big < small
 
 
+def test_phs_preset_and_life_crediting():
+    """Pumped hydro storage (v5.7): registered LDES preset, high RTE (0.80) and a long
+    (50-yr) asset life that the LDES cost path amortises over — so it isn't written off
+    over the 20-yr project horizon."""
+    import numpy as np
+    from lcoe.costs import ldes_annual_cost
+    assert "phs" in m.LDES_PRESETS and m.LDES_PHS.roundtrip_efficiency == 0.80
+    assert m.LDES_PHS.life_yr == 50
+    # life_yr is honoured: amortising over 50 yr is cheaper than over 20 yr (same WACC).
+    over50 = ldes_annual_cost(m.LDES_PHS, 24, 60.0, 700.0, 500.0, 1.0, 1.0, 0.055, 20, 0.3)
+    no_life = m.replace(m.LDES_PHS, life_yr=None)
+    over20 = ldes_annual_cost(no_life, 24, 60.0, 700.0, 500.0, 1.0, 1.0, 0.055, 20, 0.3)
+    assert over50 < over20, "50-yr life should amortise cheaper than the 20-yr project horizon"
+    # batteries (no life_yr) fall back to the project life — unchanged behaviour
+    assert m.BATTERY_US.life_yr is None
+
+
 def test_ldes_presets():
     # tanks are the default (no cavern); cavern is much cheaper energy; asymmetric power
     assert m.LDES_H2.capex_kwh_today == 20.0          # above-ground tanks
     assert m.LDES_H2_CAVERN.capex_kwh_today < 1.0     # salt cavern ~$0.6/kWh
     assert m.LDES_H2.charge_power_mw < m.LDES_H2.discharge_power_mw  # small electrolyser
-    assert set(m.LDES_PRESETS) == {"iron-air", "h2", "h2-cavern"}
+    assert set(m.LDES_PRESETS) == {"iron-air", "h2", "h2-cavern", "phs"}
 
 
 def test_firm_clean_firming_presets():

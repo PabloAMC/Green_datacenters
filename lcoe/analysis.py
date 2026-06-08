@@ -299,8 +299,9 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
         lfp_pow, batt.roundtrip_efficiency, B_arr, ch_arr, dis_pow,
         ldes.roundtrip_efficiency, n_mc)
 
-    crf_l = crf(ldes.wacc, n)
-    annuity = (1.0 - (1.0 + ldes.wacc) ** (-n)) / ldes.wacc
+    life_l = getattr(ldes, "life_yr", None) or n   # PHS ~50 yr; else project life
+    crf_l = crf(ldes.wacc, life_l)
+    annuity = (1.0 - (1.0 + ldes.wacc) ** (-life_l)) / ldes.wacc
 
     def cfg_cost(c, B, efc):
         # turbine is always installed (firms the load); electrolyser + storage scale
@@ -388,7 +389,8 @@ def run_ldes_joint(region_key="eu", target_year=2035, ldes_tech="h2",
     e_capex = ldes.capex_kwh_today
     dis_capex = ldes.discharge_capex_kw if ldes.discharge_capex_kw is not None else ldes.capex_kw_today
     h2_buy_base = GAS_H2.gas_price_mmbtu * GAS_H2.ccgt_heat_rate + GAS_H2.vom_mwh
-    crf_l = crf(ldes.wacc, n); annuity = (1.0 - (1.0 + ldes.wacc) ** (-n)) / ldes.wacc
+    life_l = getattr(ldes, "life_yr", None) or n   # PHS ~50 yr; else project life
+    crf_l = crf(ldes.wacc, life_l); annuity = (1.0 - (1.0 + ldes.wacc) ** (-life_l)) / ldes.wacc
 
     # ── pre-generate fixed weather (Y, 8760) so the NM objective is smooth ───────
     rng = np.random.default_rng(seed)

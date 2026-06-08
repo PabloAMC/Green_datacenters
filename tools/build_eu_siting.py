@@ -70,6 +70,10 @@ CANDIDATES = [
      "Atlantic sun + coastal wind"),
     ("Thisted (NW Jutland)", "jutland", "re", 2.8, 9.0, 56.5, 8.2, None,
      "North Sea wind, weak sun — wind-dominated"),
+    ("Linth-Limmern (Swiss Alps)", "swiss_alps", "re", 3.0, 3.0, 46.85, 9.0, None,
+     "moderate solar, weak Alpine wind — but firmed by abundant Swiss pumped storage"),
+    ("Carpathians (Romania)", "romania_carpathians", "re", 3.7, 5.5, 45.5, 24.5, None,
+     "decent sun + wind, firmed by Carpathian pumped storage (e.g. Tarnița)"),
     # ── Firm zero-carbon baseload (concrete plants/sites) ────────────────────────
     ("Hellisheiði (Iceland)", "iceland", "geothermal", 2.2, 8.0, 64.04, -21.40, 0.88,
      "Hellisheiði geothermal station — firm high-enthalpy, runs 24/7, no overbuild"),
@@ -85,6 +89,13 @@ CANDIDATES = [
 ]
 
 COL = {"re": "#56B4E9", "geothermal": "#D55E00", "hydro": "#0072B2"}
+
+# Sites with the topography + (ideally existing) reservoirs for cheap PUMPED STORAGE —
+# the six countries flagged as having untapped PHS potential (Spain/Tarifa, Portugal/Sines,
+# Italy/Sicily, Greece/Crete, Switzerland, Romania). For these, the gas-free RE build is
+# firmed by PHS (RTE 0.80, ~50-yr life) instead of green H₂ (RTE 0.35) — much cheaper where
+# available. Flat sites (Jutland, Dover) and the Canaries are firmed by green H₂.
+PHS_SITES = {"tarifa", "portugal_sines", "sicily", "crete", "swiss_alps", "romania_carpathians"}
 
 
 def _era5_path(slug):
@@ -121,8 +132,9 @@ def score_site(cand, grid_steps=15, n_mc=20, seed=42):
                 for i in range(YEARS + 1)]
         return {"label": label, "slug": slug, "resource": res, "lat": lat, "lon": lon,
                 "note": note, "years": [2025 + i for i in range(YEARS + 1)],
-                "delivered": lcoe, "re85_gas": None, "cf_base": cf_base,
-                "weather": "n/a (firm baseload)", "cf_solar": None, "cf_wind": None}
+                "delivered": lcoe, "firming": "firm baseload", "re85_gas": None,
+                "cf_base": cf_base, "weather": "n/a (firm baseload)",
+                "cf_solar": None, "cf_wind": None}
 
     # RE site: fully gas-free solar+wind+LFP+green-H₂ system, at the site's resource.
     npz = _era5_path(slug)
@@ -134,8 +146,12 @@ def score_site(cand, grid_steps=15, n_mc=20, seed=42):
         cf_w = float(np.mean([w for _, w in weather_years]))
         solar_t, wind_t = cf_consistent_techs(reg, "eu", cf_s, cf_w)
         wsrc = f"ERA5 {ERA5_YEARS[0]}-{ERA5_YEARS[-1]}"
+    # Firm the gas-free build with PHS where there's pumped-storage potage, else green H₂.
+    ldes_tech = "phs" if slug in PHS_SITES else "h2"
+    firming = "PHS" if ldes_tech == "phs" else "green-H₂"
     h2 = h2_system_trajectory(solar_t, wind_t, reg["battery"], irr, wind, sysp,
-                              YEARS, seed=seed, n_mc=n_mc, weather_years=weather_years)
+                              YEARS, seed=seed, n_mc=n_mc, weather_years=weather_years,
+                              ldes_tech=ldes_tech)
     # The cheaper, NOT-fully-clean alternative: a firm 85%-renewable solar+wind+battery
     # build with EU gas covering the residual ~15% (the standard main-model optimisation).
     sim = run_simulation(solar=solar_t, wind=wind_t, battery=reg["battery"], gas=reg["gas"],
@@ -151,6 +167,7 @@ def score_site(cand, grid_steps=15, n_mc=20, seed=42):
     return {"label": label, "slug": slug, "resource": res, "lat": lat, "lon": lon,
             "note": note, "years": [2025 + i for i in range(YEARS + 1)],
             "delivered": [round(float(v), 2) for v in h2["lcoe"]],
+            "firming": firming,
             "re85_gas": re85, "re85_re": re85_re,
             "buy_frac": [round(float(v), 3) for v in h2["buy_frac"]],
             "weather": wsrc, "cf_solar": round(cf_s, 3) if cf_s else None,
@@ -222,7 +239,6 @@ def build_map(results, mi):
     vmin, vmax = min(vals), min(max(vals), 175)
     cmap = plt.get_cmap("RdYlGn_r")
     norm = plt.Normalize(vmin, vmax)
-    marker = {"re": "o", "geothermal": "^", "hydro": "s"}
     extent = [-54, 30, 28, 70]   # SW Greenland → E. Mediterranean (incl. Nuuk at −50.7°)
 
     try:
@@ -248,13 +264,20 @@ def build_map(results, mi):
         tkw = {}
         have_map = False
 
-    for res in ("re", "geothermal", "hydro"):
-        pts = [r for r in results if r["resource"] == res]
+    def _mk(r):   # marker: RE split by firming (green-H₂ circle vs PHS hexagon)
+        if r["resource"] == "geothermal":
+            return "^"
+        if r["resource"] == "hydro":
+            return "s"
+        return "h" if r.get("firming") == "PHS" else "o"
+    for mk in ("o", "h", "^", "s"):
+        pts = [r for r in results if _mk(r) == mk]
         if not pts:
             continue
         ax.scatter([r["lon"] for r in pts], [r["lat"] for r in pts],
                    c=[r["delivered"][j] for r in pts], cmap=cmap, norm=norm,
-                   marker=marker[res], s=190, edgecolor="black", lw=0.7, zorder=5, **tkw)
+                   marker=mk, s=210 if mk == "h" else 190, edgecolor="black", lw=0.7,
+                   zorder=5, **tkw)
     for r in results:                      # labels: site + $value
         ax.annotate(f"{r['label'].split(' (')[0]}\n${r['delivered'][j]:.0f}",
                     (r["lon"], r["lat"]), xytext=(6, 4), textcoords="offset points",
@@ -264,7 +287,9 @@ def build_map(results, mi):
     cb.set_label(f"Delivered 24/7 carbon-free cost in {mi} ($/MWh)")
     from matplotlib.lines import Line2D
     handles = [Line2D([0], [0], marker="o", color="w", markerfacecolor="#999",
-                      markeredgecolor="k", markersize=11, label="Solar+wind+battery+H₂"),
+                      markeredgecolor="k", markersize=11, label="Sun+wind+battery + green-H₂"),
+               Line2D([0], [0], marker="h", color="w", markerfacecolor="#999",
+                      markeredgecolor="k", markersize=12, label="Sun+wind+battery + pumped storage"),
                Line2D([0], [0], marker="^", color="w", markerfacecolor="#999",
                       markeredgecolor="k", markersize=12, label="Geothermal (firm)"),
                Line2D([0], [0], marker="s", color="w", markerfacecolor="#999",
@@ -301,8 +326,9 @@ def main(argv=None):
         results.append(r)
         j = args.year - 2025
         extra = (f"  | 85% RE+gas ${r['re85_gas'][j]:5.0f}" if r.get("re85_gas") else "")
-        print(f"  {r['label']:<26} {r['resource']:<10} {args.year}: ${r['delivered'][j]:5.0f}/MWh"
-              f"{extra}  ({r['weather']})")
+        fmg = f" [{r.get('firming')}]" if r.get("firming") else ""
+        print(f"  {r['label']:<28} {r['resource']:<10} {args.year}: ${r['delivered'][j]:5.0f}/MWh"
+              f"{fmg}{extra}  ({r['weather']})")
 
     os.makedirs(os.path.join(ROOT, "figs"), exist_ok=True)
     fig = build_figure(results, args.year)

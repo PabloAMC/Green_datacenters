@@ -300,8 +300,14 @@ def siting_section():
         return ""
     d = json.load(open(sp)); yr = d["ranking_year"]
     j = yr - 2025
-    res_label = {"re": "solar + wind + battery + green-H₂", "geothermal": "geothermal (firm)",
-                 "hydro": "hydro (firm)"}
+    def res_label(r):
+        if r["resource"] == "geothermal":
+            return "geothermal (firm)"
+        if r["resource"] == "hydro":
+            return "hydro (firm)"
+        firm = r.get("firming", "green-H₂")
+        store = "pumped storage" if firm == "PHS" else "green-H₂"
+        return f"solar + wind + battery + {store}"
     rows = sorted(d["sites"], key=lambda r: r["delivered"][j])
 
     def _re85(r):
@@ -311,7 +317,7 @@ def siting_section():
             return "$%.0f" % r["re85_gas"][j]
         return "<span style='color:#999'>infeasible*</span>"   # low-wind: hits the solar wall
     body = "".join(
-        f"<tr><th>{r['label']}</th><td>{res_label[r['resource']]}</td>"
+        f"<tr><th>{r['label']}</th><td>{res_label(r)}</td>"
         f"<td class='cx'>${r['delivered'][j]:.0f}</td><td>{_re85(r)}</td></tr>"
         for r in rows)
     table = ("<table><thead><tr><th>Location</th><th>Cheapest clean resource</th>"
