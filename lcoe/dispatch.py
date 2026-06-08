@@ -39,7 +39,7 @@ class ChronologicalSimulator:
         self.sys       = sys
         self.batt      = batt
         self.workload  = workload
-        self.clearsky  = solar_clearsky(mean_irr)
+        self.clearsky  = solar_clearsky(mean_irr, getattr(sys, "solar_performance_ratio", 1.0))
         self.mean_wind = mean_wind_ms
         # Datacenter load shape (mean 1.0). "flat" → all-ones → constant-load model.
         self.load = load_profile(getattr(sys, "load_profile", "flat"))
@@ -84,7 +84,8 @@ class ChronologicalSimulator:
               f"C_win 0–{sys.c_win_max}×, B 0–{sys.storage_hours_max}h) …")
         (self.gas_mean, self.gas_p90, self.fec_mean, self.gas_peak_mean,
          self.gas_peak_firm_mean, self.drop_mean,
-         self.sol_cf_mean, self.win_cf_mean) = self._run_mc(seed)
+         self.sol_cf_mean, self.win_cf_mean,
+         self.gas_peak_firm_p90) = self._run_mc(seed)
         print("  [Sim] Done.")
 
     def _dispatch_one_year(self, sol_tr: np.ndarray,
@@ -197,7 +198,8 @@ class ChronologicalSimulator:
         return (all_gas.mean(0), np.percentile(all_gas, 90, axis=0),
                 all_fec.mean(0), all_gas_peak.mean(0), all_gas_peak_firm.mean(0),
                 all_drop.mean(0),
-                float(np.mean(cf_s_list)), float(np.mean(cf_w_list)))
+                float(np.mean(cf_s_list)), float(np.mean(cf_w_list)),
+                np.percentile(all_gas_peak_firm, 90, axis=0))
 
     def interp3(self, surface: np.ndarray, C_sol: float,
                 C_win: float, B: float) -> float:

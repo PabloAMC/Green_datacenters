@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, fields, replace
 
-MODEL_VERSION = "5.6.0"
+MODEL_VERSION = "5.7.0"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -19,8 +19,15 @@ class TechParams:
     learning_rate: float        # fractional cost reduction per doubling of capacity
     cumulative_gw_2025: float   # GW cumulative installed globally, base year
     annual_additions_gw: float  # GW added in 2025
-    additions_growth_rate: float
+    additions_growth_rate: float   # g0: growth of annual additions in year 1
     uncertainty_sigma: float = 0.15
+    # Deployment-trajectory decay (v5.7). The additions growth rate decays
+    # geometrically toward `additions_growth_floor` (g_i = floor+(g0-floor)·decay^(i-1))
+    # so cumulative capacity follows an S-curve rather than compounding forever. 1.0 =
+    # legacy constant growth (no decay), kept as the default so unset technologies are
+    # unchanged. See `costs.cumulative_capacity`.
+    additions_growth_decay: float = 1.0
+    additions_growth_floor: float = 0.0
     # Fraction of the (bundled) LCOE that is ongoing O&M rather than financed
     # capital — used only to split delivered cost into capex vs opex. Solar/wind
     # have no fuel, so LCOE ≈ capital recovery + fixed O&M; O&M is ~15–25% of LCOE.
@@ -59,6 +66,8 @@ class BatteryParams:
     cumulative_gwh_2025: float = 1800.0
     annual_additions_gwh: float = 600.0
     additions_growth_rate: float = 0.18
+    additions_growth_decay: float = 1.0   # v5.7 S-curve decay (1.0 = legacy constant growth)
+    additions_growth_floor: float = 0.0
     roundtrip_efficiency: float = 0.924   # DC-DC LFP; sqrt each way ≈ 96.1%
     om_frac_capex: float = 0.015
     # Degradation (LFP Wöhler curve)
@@ -73,6 +82,11 @@ class BatteryParams:
     discharge_capex_kw: float = None   # $/kW discharge kit; None → same as capex_kw
     charge_power_mw: float = 1.0       # charge power, MW per MW-load (e.g. electrolyser)
     discharge_power_mw: float = 1.0    # discharge power, MW per MW-load (e.g. turbine)
+    # Asset life (yr) for amortising the LDES capital. None → fall back to the project
+    # lifetime (the conservative default for batteries). Set explicitly for long-lived
+    # civil-works storage (e.g. pumped hydro ~50 yr) so it isn't unfairly written off over
+    # the 20-yr project horizon. Honoured by the LDES cost paths (costs/h2system/analysis).
+    life_yr: int = None
 
 
 @dataclass
@@ -227,6 +241,15 @@ class SystemParams:
     # "cooling" adds a temperature-driven PUE overhead so peak load > average and firm
     # gas backup (sized to peak) is modestly larger (§5.7).
     load_profile: str = "flat"
+    # Firm gas-plant capacity sizing. The firm backup is sized to the peak hourly
+    # residual; "mean" (default, unchanged headline) sizes to the mean-across-weather-years
+    # annual peak, "p90" sizes to the 1-in-10 (P90) annual peak — a more conservative
+    # "never goes dark" sizing that slightly raises gas capex. Energy/fuel unaffected.
+    firm_gas_sizing: str = "mean"
+    # Solar system performance ratio. 1.0 (default) keeps the simulated solar CF anchored
+    # to the imported-LCOE cost basis (mean_irr/24; the v5.5 CF-consistency invariant);
+    # <1.0 derates toward a bottom-up specific-yield CF (then re-level the solar LCOE).
+    solar_performance_ratio: float = 1.0
 
 
 # ── Workload presets ──────────────────────────────────────────────────────────
@@ -268,20 +291,32 @@ WORKLOAD_PRESETS = {
 # wind ≈0.28 — inside Lazard's CF bands — so the imported $/MWh and the simulated MWh
 # now refer to the same plant. (Pre-v5.5 the dispatch ran at ~0.15/0.22, ~½ the CF the
 # LCOE assumed, overstating overbuild and biasing high-RE cost upward.)
+# DEPLOYMENT TRAJECTORY (v5.7). Additions grow off the 2025 base with a *decaying*
+# growth rate (S-curve), not constant compounding. The central path is a best guess that
+# keeps near-term additions robust — driven by developing-world electrification and the
+# AI-datacenter clean-power buildout — but lets growth taper as mature markets saturate
+# and grid-integration limits bite. It lands solar ≈15.6 TW, wind ≈4.2 TW, batteries
+# ≈14.5 TWh cumulative by 2040 (vs the old constant-growth 38 TW / 7 TW / 45 TWh, which
+# were ~3-4× mainstream IEA WEO / BNEF NEO and pulled deep-future RE cost down too fast).
+# decay/floor are documented in §3; a low/central/high band is tabulated there too.
 SOLAR = TechParams("Solar PV", lcoe_today=52.0, learning_rate=0.30,
                    cumulative_gw_2025=2900.0, annual_additions_gw=650.0,
-                   additions_growth_rate=0.15, om_frac_lcoe=0.15)
+                   additions_growth_rate=0.06, additions_growth_decay=0.85,
+                   om_frac_lcoe=0.15)
 
 WIND = TechParams("Onshore Wind", lcoe_today=50.0, learning_rate=0.17,
                   cumulative_gw_2025=1300.0, annual_additions_gw=167.0,
-                  additions_growth_rate=0.10, om_frac_lcoe=0.25, life_yr=25)
+                  additions_growth_rate=0.03, additions_growth_decay=0.85,
+                  om_frac_lcoe=0.25, life_yr=25)
 
 # Energy component identical across regions (globally traded LFP cells); EU
 # carries a ~25% power/BOS/EPC soft-cost premium (higher labour/permitting, no
 # IRA-equivalent manufacturing credit). EU is therefore modestly MORE expensive
 # than the US — the opposite of the v4 assumption.
-BATTERY_US = BatteryParams("LFP Battery (US)", capex_kwh_today=180.0, capex_kw_today=140.0)
-BATTERY_EU = BatteryParams("LFP Battery (EU)", capex_kwh_today=180.0, capex_kw_today=175.0)
+BATTERY_US = BatteryParams("LFP Battery (US)", capex_kwh_today=180.0, capex_kw_today=140.0,
+                           additions_growth_rate=0.08, additions_growth_decay=0.85)
+BATTERY_EU = BatteryParams("LFP Battery (EU)", capex_kwh_today=180.0, capex_kw_today=175.0,
+                           additions_growth_rate=0.08, additions_growth_decay=0.85)
 
 GAS = GasParams(name="Gas Backup (US)", gas_price_mmbtu=4.0,
                 carbon_price_today=0.0, carbon_trajectory="linear")
@@ -313,6 +348,50 @@ GAS_H2 = GasParams(
     carbon_trajectory="linear",
     carbon_intensity_ccgt=0.0,     # green H2 → no combustion CO2
     carbon_intensity_ocgt=0.0,
+)
+
+# ── Firm CLEAN baseload firming (geothermal / hydro) — v5.7, --firming geothermal|hydro ──
+# Some sites have a *firm, zero-carbon* resource that makes the whole solar/wind/battery/gas
+# question moot: just run the datacenter on it. Modelled exactly like the gas/H2 firming —
+# the "a power plant with X" trick the GAS_H2 preset already uses — but with **zero fuel and
+# zero carbon**, a high baseload capacity factor, and infrastructure-grade capital (long life,
+# low WACC). Used both as a `--firming` backup (zero-carbon firm support for an RE build) and,
+# via `gas_pure_lcoe(..., cf=...)`, as the standalone firm-clean delivered-cost baseline that
+# the EU-siting comparison ranks (tools/build_eu_siting.py). All figures are illustrative,
+# adjustable, and region-agnostic; cite the per-resource sources below.
+#
+# SOURCED to IRENA, Renewable Power Generation Costs in 2023 (Sep 2024): capex is IRENA's
+# 2023 global weighted-average total installed cost; CF from IRENA (geothermal 2024 ≈ 88%).
+# LCOE is then computed through the model's OWN per-tech WACC (for a fair head-to-head with the
+# renewables it is ranked against), so it lands modestly BELOW IRENA's published LCOE — which is
+# quoted at IRENA's higher (~7.5%) WACC — as a cross-check (see the comment per resource).
+#
+# Geothermal (e.g. Iceland high-enthalpy volcanic): firm baseload, no fuel, no combustion CO2.
+# Capex $4,589/kW (IRENA 2023), FOM ≈ $130/kW-yr (NREL ATB 2024), CF 0.88 (IRENA 2024), 30-yr
+# life, 6% WACC → ≈ $63/MWh. Cross-check: IRENA's published 2023 LCOE is $71/MWh (at ~7.5% WACC).
+GEOTHERMAL = GasParams(
+    name="Geothermal (firm, zero-carbon)",
+    gas_price_mmbtu=0.0, ccgt_heat_rate=0.0, ocgt_heat_rate=0.0,   # no fuel
+    ccgt_capex_kw=4589.0, ocgt_capex_kw=4589.0,                    # IRENA 2023 installed cost
+    ccgt_fom_kw_yr=130.0, ocgt_fom_kw_yr=130.0, vom_mwh=3.0,
+    carbon_intensity_ccgt=0.0, carbon_intensity_ocgt=0.0,
+    carbon_price_today=0.0, carbon_trajectory="linear",
+    lifetime_years=30, wacc=0.06,
+)
+# Reservoir / run-of-river hydro at an abundant site (e.g. Norway, Sweden, the Alps): firm-
+# dispatchable, zero-carbon. Capex $2,806/kW (IRENA 2023), FOM ≈ $50/kW-yr, CF 0.55, 40-yr life,
+# 5% WACC → ≈ $46/MWh. The CF (0.55) is the key, honest lever: a real reservoir is energy-limited
+# (seasonal inflow), so it cannot run flat-out as a firm baseload — 0.55 is closer to real hydro
+# operation than a 0.85 "always-on" assumption (which would give an over-optimistic ~$30). LCOE is
+# then in line with IRENA's published 2023 hydro LCOE of $57/MWh (the small gap is the lower WACC).
+HYDRO = GasParams(
+    name="Hydropower (firm, zero-carbon)",
+    gas_price_mmbtu=0.0, ccgt_heat_rate=0.0, ocgt_heat_rate=0.0,
+    ccgt_capex_kw=2806.0, ocgt_capex_kw=2806.0,                    # IRENA 2023 installed cost
+    ccgt_fom_kw_yr=50.0, ocgt_fom_kw_yr=50.0, vom_mwh=2.0,
+    carbon_intensity_ccgt=0.0, carbon_intensity_ocgt=0.0,
+    carbon_price_today=0.0, carbon_trajectory="linear",
+    lifetime_years=40, wacc=0.05,
 )
 
 # ── Long-duration energy storage (LDES) presets — for the --ldes overlay ────────
@@ -372,15 +451,42 @@ LDES_H2_CAVERN = BatteryParams(
     additions_growth_rate=0.12, roundtrip_efficiency=0.35,
     calendar_deg_per_yr=0.010, cycle_deg_per_fec=1e-5, om_frac_capex=0.03, wacc=0.08,
 )
-LDES_PRESETS = {"iron-air": LDES_IRONAIR, "h2": LDES_H2, "h2-cavern": LDES_H2_CAVERN}
+# (d) Pumped hydro storage (PHS) — the dominant grid storage worldwide and the cheap
+#     multi-day firming option where topography + (ideally existing) reservoirs allow, e.g.
+#     Switzerland, Italy, Spain, Portugal, Greece, Romania, Norway. A round-trip STORE (not
+#     a generator): pump water up with RE surplus, regenerate ~80% later through a reversible
+#     pump-turbine. Modelled in the LDES tier (firms RE; residual backstopped by green H2 so
+#     it stays zero-carbon). SOURCED to NREL ATB (2022–24) + DOE/PNNL Mongird et al. (2020):
+#     RTE 0.80 (range 70–87%); ~50-yr life (vs ~20 yr for batteries — credited via life_yr);
+#     all-in CAPEX $1,999–5,505/kW (range = site quality; the low end = EXISTING-reservoir
+#     sites, the "untapped" EU case). Decomposed (assumption, from the all-in $/kW) into a
+#     reversible powerhouse ~$1,200/kW (split pump $700 + turbine $500) and a cheap energy/
+#     reservoir component $60/kWh (existing-reservoir end). FOM ≈ $18/kW-yr → om_frac≈0.01.
+#     Mature civil works → no learning curve. Lazard's LCOS does NOT cover PHS (Li-ion-centric).
+LDES_PHS = BatteryParams(
+    name="Pumped hydro storage (PHS)",
+    capex_kwh_today=60.0,            # reservoir/energy, $/kWh (existing-reservoir EU end)
+    capex_kw_today=700.0,            # pump (charge) kit, $/kW
+    discharge_capex_kw=500.0,        # turbine (discharge) kit, $/kW (≈ $1,200/kW reversible)
+    charge_power_mw=1.0, discharge_power_mw=1.0,    # ~symmetric reversible pump-turbine
+    learning_rate=0.0,               # mature civil-works tech → flat (no learning curve)
+    cumulative_gwh_2025=1600.0, annual_additions_gwh=30.0, additions_growth_rate=0.05,
+    roundtrip_efficiency=0.80,       # Mongird 2020 central (range 70–87%)
+    calendar_deg_per_yr=0.003, cycle_deg_per_fec=1e-6, om_frac_capex=0.01,
+    wacc=0.055, life_yr=50,          # long-life infrastructure (amortised over 50 yr)
+)
+LDES_PRESETS = {"iron-air": LDES_IRONAIR, "h2": LDES_H2, "h2-cavern": LDES_H2_CAVERN,
+                "phs": LDES_PHS}
 
 
 SOLAR_EU = TechParams("Solar PV (EU)", lcoe_today=60.0, learning_rate=0.30,
                       cumulative_gw_2025=2900.0, annual_additions_gw=650.0,
-                      additions_growth_rate=0.15, om_frac_lcoe=0.15)
+                      additions_growth_rate=0.06, additions_growth_decay=0.85,
+                      om_frac_lcoe=0.15)
 WIND_EU  = TechParams("Onshore Wind (EU)", lcoe_today=48.0, learning_rate=0.17,
                       cumulative_gw_2025=1300.0, annual_additions_gw=167.0,
-                      additions_growth_rate=0.10, om_frac_lcoe=0.25, life_yr=25)
+                      additions_growth_rate=0.03, additions_growth_decay=0.85,
+                      om_frac_lcoe=0.25, life_yr=25)
 
 SMR    = SMRParams()
 SMR_EU = SMRParams(name="SMR (EU)", lcoe_foak=140.0, lcoe_noak=85.0, years_to_noak=12)
@@ -413,7 +519,8 @@ REGIONS = {
 
 # Firming-resource choice (CLI --firming). "gas" keeps the region's default natural
 # gas; "h2" swaps in green-hydrogen firming (zero-carbon, pricey fuel).
-FIRMING_PRESETS = {"gas": None, "h2": GAS_H2}   # None → region default gas
+FIRMING_PRESETS = {"gas": None, "h2": GAS_H2,   # None → region default gas
+                   "geothermal": GEOTHERMAL, "hydro": HYDRO}   # firm zero-carbon baseload
 
 
 # Resource-quality presets: (mean_irr [kWh/m²/day], mean_wind_ms). "default" is the

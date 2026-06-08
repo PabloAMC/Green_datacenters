@@ -13,14 +13,37 @@ from .params import TechParams, BatteryParams, GasParams, GridPPAParams
 # ─────────────────────────────────────────────────────────────────────────────
 
 def cumulative_capacity(tech, years: int) -> np.ndarray:
+    """
+    Cumulative installed capacity trajectory feeding the Wright's-Law learning curve.
+
+    Annual additions grow off the 2025 base, but the *growth rate of additions
+    decays* over the horizon (v5.7): real technology adoption is an S-curve, not
+    perpetual compounding — the largest markets saturate and grid-integration limits
+    bite, so a constant growth rate runs cumulative capacity to physically implausible
+    levels by 2040 (the old constant-15% solar path reached 38 TW, ~3-4× mainstream
+    IEA/BNEF projections, which made the learning-curve cost decline too fast). The
+    year-i additions growth is
+
+        g_i = floor + (g0 - floor)·decay^(i-1)      (g_1 = g0; → floor as i grows)
+
+    and additions_i = add·Π_{j≤i}(1+g_j). With `additions_growth_decay = 1.0`
+    (the default) this reduces EXACTLY to the legacy constant-growth formula
+    add·(1+g0)^i, so technologies that don't set a decay (e.g. the LDES presets) are
+    unchanged.
+    """
     if isinstance(tech, BatteryParams):
         base, add, gr = tech.cumulative_gwh_2025, tech.annual_additions_gwh, tech.additions_growth_rate
     else:
         base, add, gr = tech.cumulative_gw_2025, tech.annual_additions_gw, tech.additions_growth_rate
+    decay = getattr(tech, "additions_growth_decay", 1.0)
+    floor = getattr(tech, "additions_growth_floor", 0.0)
     cum = np.empty(years + 1)
     cum[0] = base
+    prod = 1.0
     for i in range(1, years + 1):
-        cum[i] = cum[i - 1] + add * (1.0 + gr) ** i
+        g = floor + (gr - floor) * decay ** (i - 1)   # year-1 growth = gr; decays toward floor
+        prod *= (1.0 + g)
+        cum[i] = cum[i - 1] + add * prod
     return cum
 
 
@@ -191,13 +214,50 @@ def ldes_annual_cost(ldes, storage_hours, capex_kwh, charge_capex_kw,
     """
     if storage_hours <= 0:
         return 0.0
+    # Amortise over the asset's own life when set (e.g. PHS ~50 yr), else the project life.
+    life = getattr(ldes, "life_yr", None) or n_yr
     energy_capex = storage_hours * capex_kwh * 1e3
     power_capex = charge_pow * charge_capex_kw * 1e3 + discharge_pow * discharge_capex_kw * 1e3
     cost_one = energy_capex + power_capex
     deg = ldes.calendar_deg_per_yr + ldes.cycle_deg_per_fec * effective_fec_per_day * 365
-    annuity = (1.0 - (1.0 + r) ** (-n_yr)) / r if r > 0 else float(n_yr)
+    annuity = (1.0 - (1.0 + r) ** (-life)) / r if r > 0 else float(life)
     npv = cost_one + deg * energy_capex * annuity
-    return npv * crf(r, n_yr) + cost_one * ldes.om_frac_capex
+    return npv * crf(r, life) + cost_one * ldes.om_frac_capex
+
+
+def h2_system_cost_split(C_sol, C_win, B_lfp, elec, H2, resid, efc, *,
+                         batt, ldes, n, CF_sol, CF_win, lcoe_sol, lcoe_win,
+                         om_sol, om_win, lfp_kwh, lfp_kw, ch_capex, e_capex,
+                         dis_capex, h2_buy, crf_l, annuity):
+    """
+    Per-MWh-load delivered-cost components of the fully gas-free, zero-carbon system
+    (solar + wind + LFP + self-produced green H₂; residual bought as green H₂).
+
+    SINGLE SOURCE shared by `h2system.h2_system_trajectory` (the fig1 line / fig6
+    breakdown) and `analysis.run_ldes_joint` (the co-optimisation) so the two can
+    never drift apart — they previously duplicated this formula behind a "keep in
+    sync" comment. `resid` (purchased-H₂ share of load) and `efc` (H₂-store
+    throughput cycles/day) come from `dispatch.dispatch_h2_vec`. The full-system
+    turbine is always installed (firms the load); only the electrolyser and store
+    scale with the self-production design. Augmentation applies to the H₂-store energy.
+    """
+    gen_s = C_sol * CF_sol * lcoe_sol
+    gen_w = C_win * CF_win * lcoe_win
+    gen_capex = gen_s * (1.0 - om_sol) + gen_w * (1.0 - om_win)
+    gen_om    = gen_s * om_sol + gen_w * om_win
+    lfp_cap, lfp_om = battery_cost_split(batt, B_lfp, lfp_kwh, lfp_kw, batt.wacc, n)
+    lfp_cap /= 8760.0; lfp_om /= 8760.0
+    om = ldes.om_frac_capex
+    elec_one  = elec * ch_capex * 1e3
+    turb_one  = 1.0 * dis_capex * 1e3
+    store_one = H2 * e_capex * 1e3
+    deg = ldes.calendar_deg_per_yr + ldes.cycle_deg_per_fec * efc * 365
+    elec_cap  = (elec_one * crf_l + elec_one * om) / 8760.0
+    turb_cap  = (turb_one * crf_l + turb_one * om) / 8760.0
+    store_cap = ((store_one + deg * store_one * annuity) * crf_l + store_one * om) / 8760.0
+    return {"gen_capex": gen_capex, "gen_om": gen_om, "lfp_capex": lfp_cap,
+            "lfp_om": lfp_om, "elec_capex": elec_cap, "store_capex": store_cap,
+            "turbine_capex": turb_cap, "buy_h2": resid * h2_buy}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -254,11 +314,16 @@ def gas_cost_split(gas_frac: float, gas: GasParams, year_index: int, r: float,
     }
 
 
-def gas_pure_lcoe(gas: GasParams, year_index: int, r: float) -> float:
+def gas_pure_lcoe(gas: GasParams, year_index: int, r: float, cf: float = 0.85) -> float:
+    """Pure delivered LCOE of a stand-alone firm plant of this type at capacity factor `cf`.
+
+    The default cf=0.85 is the merchant-gas baseline. For a firm CLEAN baseload resource
+    (geothermal cf≈0.90, hydro cf≈0.85; fuel/heat-rate/carbon all 0) pass its own CF — this
+    is the standalone firm-clean delivered cost the EU-siting comparison ranks (§ siting)."""
     crf_g = crf(r, gas.lifetime_years)
     p_c   = carbon_price(gas, year_index)
-    return ((gas.ccgt_capex_kw * 1e3 * crf_g) / (8760 * 0.85)
-            + (gas.ccgt_fom_kw_yr * 1e3) / (8760 * 0.85)
+    return ((gas.ccgt_capex_kw * 1e3 * crf_g) / (8760 * cf)
+            + (gas.ccgt_fom_kw_yr * 1e3) / (8760 * cf)
             + gas.gas_price_mmbtu * gas.ccgt_heat_rate + gas.vom_mwh
             + p_c * gas.carbon_intensity_ccgt)
 

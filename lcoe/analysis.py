@@ -11,7 +11,7 @@ from scipy.optimize import minimize
 from .params import (REGIONS, RESOURCE_PRESETS, LDES_PRESETS, GAS_H2, FIRM,
                      WorkloadProfile, _sys_with)
 from .costs import (cumulative_capacity, wright_law, rewacc_lcoe, crf,
-                    battery_annualised_cost)
+                    h2_system_cost_split)
 from .weather import solar_clearsky, generate_weather_year
 from .dispatch import dispatch_ldes_overlay, dispatch_h2_vec
 from .simulate import run_simulation
@@ -179,6 +179,12 @@ def run_tornado(region_key="eu", re_target=0.90, target_year=2030, years=15,
         ("Gas price ∓25%",
          dict(gas=replace(g, gas_price_mmbtu=g.gas_price_mmbtu * 1.25)),
          dict(gas=replace(g, gas_price_mmbtu=g.gas_price_mmbtu * 0.75))),
+        # Carbon-price introduction/shock — the lever that matters most where the base
+        # carbon price is low (the US baseline is $0). "low" overrides ADD $40/tCO₂ to the
+        # base (raising gas → helping RE, i.e. a lower gap); "high" is the base price.
+        ("Carbon +$40 / base",
+         dict(gas=replace(g, carbon_price_today=g.carbon_price_today + 40.0)),
+         dict(gas=g)),
         ("RE WACC 4% / 7%",
          dict(solar=replace(s, wacc=0.04), wind=replace(w, wacc=0.04)),
          dict(solar=replace(s, wacc=0.07), wind=replace(w, wacc=0.07))),
@@ -293,8 +299,9 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
         lfp_pow, batt.roundtrip_efficiency, B_arr, ch_arr, dis_pow,
         ldes.roundtrip_efficiency, n_mc)
 
-    crf_l = crf(ldes.wacc, n)
-    annuity = (1.0 - (1.0 + ldes.wacc) ** (-n)) / ldes.wacc
+    life_l = getattr(ldes, "life_yr", None) or n   # PHS ~50 yr; else project life
+    crf_l = crf(ldes.wacc, life_l)
+    annuity = (1.0 - (1.0 + ldes.wacc) ** (-life_l)) / ldes.wacc
 
     def cfg_cost(c, B, efc):
         # turbine is always installed (firms the load); electrolyser + storage scale
@@ -382,7 +389,8 @@ def run_ldes_joint(region_key="eu", target_year=2035, ldes_tech="h2",
     e_capex = ldes.capex_kwh_today
     dis_capex = ldes.discharge_capex_kw if ldes.discharge_capex_kw is not None else ldes.capex_kw_today
     h2_buy_base = GAS_H2.gas_price_mmbtu * GAS_H2.ccgt_heat_rate + GAS_H2.vom_mwh
-    crf_l = crf(ldes.wacc, n); annuity = (1.0 - (1.0 + ldes.wacc) ** (-n)) / ldes.wacc
+    life_l = getattr(ldes, "life_yr", None) or n   # PHS ~50 yr; else project life
+    crf_l = crf(ldes.wacc, life_l); annuity = (1.0 - (1.0 + ldes.wacc) ** (-life_l)) / ldes.wacc
 
     # ── pre-generate fixed weather (Y, 8760) so the NM objective is smooth ───────
     rng = np.random.default_rng(seed)
@@ -410,13 +418,18 @@ def run_ldes_joint(region_key="eu", target_year=2035, ldes_tech="h2",
         resid, efc = dispatch_h2_vec(sol2d, win2d, C_sol, C_win, B_lfp, lfp_pow,
                                      batt.roundtrip_efficiency, H2, elec, 1.0,
                                      ldes.roundtrip_efficiency)
-        gen = C_sol * CF_sol * lcoe_sol + C_win * CF_win * lcoe_win
-        lfp = battery_annualised_cost(batt, B_lfp, lfp_kwh, lfp_kw, batt.wacc, n) / 8760.0
-        cost_one = (elec * ch_capex + 1.0 * dis_capex) * 1e3 + H2 * e_capex * 1e3
-        npv = cost_one + (ldes.calendar_deg_per_yr + ldes.cycle_deg_per_fec * efc * 365) \
-            * (H2 * e_capex * 1e3) * annuity
-        cap = (npv * crf_l + cost_one * ldes.om_frac_capex) / 8760.0
-        buy = resid * h2_buy_base * mult
+        # Shared cost formula (single source — also used by h2system.h2_system_trajectory).
+        comp = h2_system_cost_split(
+            C_sol, C_win, B_lfp, elec, H2, resid, efc,
+            batt=batt, ldes=ldes, n=n, CF_sol=CF_sol, CF_win=CF_win,
+            lcoe_sol=lcoe_sol, lcoe_win=lcoe_win, om_sol=cfg["solar"].om_frac_lcoe,
+            om_win=cfg["wind"].om_frac_lcoe, lfp_kwh=lfp_kwh, lfp_kw=lfp_kw,
+            ch_capex=ch_capex, e_capex=e_capex, dis_capex=dis_capex,
+            h2_buy=h2_buy_base * mult, crf_l=crf_l, annuity=annuity)
+        gen = comp["gen_capex"] + comp["gen_om"]
+        lfp = comp["lfp_capex"] + comp["lfp_om"]
+        cap = comp["elec_capex"] + comp["store_capex"] + comp["turbine_capex"]
+        buy = comp["buy_h2"]
         return gen + lfp + cap + buy, dict(C_sol=C_sol, C_win=C_win, B_lfp=B_lfp,
                                            elec=elec, H2=H2, buy_frac=resid,
                                            gen=gen, lfp=lfp, cap=cap, buy=buy)

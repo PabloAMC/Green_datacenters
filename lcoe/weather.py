@@ -87,7 +87,7 @@ def _ar1_series(phi: float, n: int, rng: np.random.Generator) -> np.ndarray:
     return x
 
 
-def solar_clearsky(mean_irr_kwh_m2_day: float) -> np.ndarray:
+def solar_clearsky(mean_irr_kwh_m2_day: float, performance_ratio: float = 1.0) -> np.ndarray:
     """
     Deterministic 8760-h clear-sky AC capacity-factor trace.
 
@@ -99,6 +99,14 @@ def solar_clearsky(mean_irr_kwh_m2_day: float) -> np.ndarray:
     set to `mean_irr/24` and the cloud factor was then applied *again*, double-counting
     cloud losses and depressing the simulated solar CF ~33% below NSRDB/Lazard — e.g.
     US 0.153 vs the ~0.22–0.25 implied by the same Lazard LCOE inputs.)
+
+    `performance_ratio` (default 1.0) is an explicit system performance-ratio knob: the
+    effective CF lands at `mean_irr/24 · performance_ratio`. The default of 1.0 keeps the
+    CF *anchored to the imported-LCOE cost basis* (the v5.5 invariant — the simulated CF
+    sits inside the Lazard utility-solar band the LCOE is levelised at, NOT derived
+    bottom-up from a DC→AC system model). Set <1.0 (e.g. ~0.8) to instead derate toward a
+    bottom-up specific-yield CF; this is then NO LONGER cost-basis-consistent and the
+    imported solar LCOE should be re-levelled to match.
     """
     hours = np.arange(8760)
     doy   = hours // 24
@@ -106,8 +114,8 @@ def solar_clearsky(mean_irr_kwh_m2_day: float) -> np.ndarray:
     seasonal = 1.0 + 0.35 * np.cos(2 * np.pi * (doy - 172) / 365)
     diurnal  = np.clip(np.sin((hod - 6) * np.pi / 12), 0, 1) ** 1.1
     raw = diurnal * seasonal
-    # Pre-divide by the cloud mean so that E[clear-sky × cloud] = mean_irr/24.
-    target_cf = mean_irr_kwh_m2_day / 24.0 / CLOUD_MEAN
+    # Pre-divide by the cloud mean so that E[clear-sky × cloud] = mean_irr/24 · PR.
+    target_cf = mean_irr_kwh_m2_day / 24.0 * performance_ratio / CLOUD_MEAN
     # Iterate once to absorb the (small) clip at 1.0 of summer-noon hours, so the
     # *clipped* trace still carries the intended mean rather than losing the peaks.
     cs = raw * (target_cf / raw.mean() if raw.mean() > 0 else 1.0)

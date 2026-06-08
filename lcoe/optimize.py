@@ -41,6 +41,7 @@ def optimal_cost_3d(
     sys: SystemParams,
     use_p90: bool = False,
     prev_x: Optional[np.ndarray] = None,
+    diag: Optional[dict] = None,
 ) -> Tuple[float, float, float, float, float, float, float, float, float]:
     """
     Minimise system LCOE over (C_sol, C_win, B) subject to a renewable target.
@@ -81,7 +82,10 @@ def optimal_cost_3d(
             f_peak = sim.interp3(sim.gas_peak_mean, C_sol, C_win, B)
         else:   # firm: gas serves the would-be-shed energy too; size to firm peak
             f_gas, f_drop = f_gas_shed + f_drop_max, 0.0
-            f_peak = sim.interp3(sim.gas_peak_firm_mean, C_sol, C_win, B)
+            firm_surface = (sim.gas_peak_firm_p90
+                            if getattr(sys, "firm_gas_sizing", "mean") == "p90"
+                            else sim.gas_peak_firm_mean)
+            f_peak = sim.interp3(firm_surface, C_sol, C_win, B)
         served = max(1.0 - f_drop, 1e-6)
         f_re_served = 1.0 - f_gas / served
         c_gen  = C_sol * sim.sol_cf_mean * lcoe_sol + C_win * sim.win_cf_mean * lcoe_win
@@ -176,6 +180,12 @@ def optimal_cost_3d(
         cg0, cs0, cgz0, cp0, _, _ = evaluate(C_sol, C_win, B)
         cur_total = cg0 + cs0 + cgz0 + cp0
         if p_re >= r_target - 0.005 and prev_total <= cur_total * (1.0 + cont_tol):
+            # Diagnostic (opt-in): record that the continuity tie-break fired and the
+            # cost change it introduced (prev−cur; ≤ cont_tol·cur, i.e. ≤1%), so the
+            # bound stays visible and can't silently drift. Pure observation; no effect.
+            if diag is not None:
+                diag["fired"] = diag.get("fired", 0) + 1
+                diag.setdefault("deltas", []).append(prev_total - cur_total)
             C_sol, C_win, B = pcs, pcw, pB
 
     # Boundary-binding guard: warn if any optimum reaches its max bound (within
@@ -230,7 +240,10 @@ def delivered_cost_split(sim, C_sol, C_win, B, solar, wind, lcoe_sol, lcoe_win,
         f_peak = sim.interp3(sim.gas_peak_mean, C_sol, C_win, B)
     else:                    # firm: gas serves all; size to firm peak
         f_gas, f_drop = f_gas_shed + f_drop_max, 0.0
-        f_peak = sim.interp3(sim.gas_peak_firm_mean, C_sol, C_win, B)
+        firm_surface = (sim.gas_peak_firm_p90
+                        if getattr(sys, "firm_gas_sizing", "mean") == "p90"
+                        else sim.gas_peak_firm_mean)
+        f_peak = sim.interp3(firm_surface, C_sol, C_win, B)
 
     gen_s = C_sol * sim.sol_cf_mean * lcoe_sol
     gen_w = C_win * sim.win_cf_mean * lcoe_win

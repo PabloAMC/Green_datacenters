@@ -1,6 +1,6 @@
 # Off-grid Datacenter LCOE Model — Technical Documentation
 
-**Model version:** v5.6  
+**Model version:** v5.7  
 **Code file:** `lcoe/` package (entry point `datacenter_lcoe.py`)  
 **Last verified:** June 2026  
 **All numerical values cross-checked against model output (`output/*_results.json`)**
@@ -82,6 +82,32 @@ This model computes the least-cost combination of solar PV, onshore wind, batter
 ## Version history & rationale
 
 *Most recent first. This is a changelog of what each model version changed and why; safe to skip on a first read — the methodology it refers to is documented in the sections below.*
+
+**v5.7 — defensible deployment trajectory (S-curve learning), H₂-line fidelity, gas-baseline
+transparency, and observability.** The headline-moving change is the **deployment trajectory**
+(§3): through v5.6 cumulative capacity compounded annual additions at a *constant* growth rate,
+which ran solar to ~38 TW by 2040 (~3–4× mainstream IEA WEO / BNEF NEO) and so made the
+learning-curve cost decline too fast at the long end. v5.7 lets the additions growth *decay*
+(an S-curve: `additions_growth_decay`), with a best-guess central path that keeps near-term
+additions robust — developing-world electrification + the AI-datacenter clean-power buildout —
+but tapers as mature markets saturate. Central 2040 cumulatives land **solar ≈15.6 TW, wind
+≈4.2 TW, batteries ≈14.5 TWh**; the year-0 (2025) costs and all capacity factors are unchanged,
+so every **2025 headline number and optimal build is identical** — only *future* unit costs
+rise. Net effect: deep-future RE costs lift ~25–40% at 2040 (e.g. solar generation LCOE 2040
+$13.7→$21.9), **US high-RE no longer crosses cheap flat gas within the horizon** (the
+moderate-RE mid-2030s crossings of v5.5/5.6 disappear — they return only against a stressed-gas
+baseline), and **EU 90% parity moves ~2029→~2030**. The directional conclusions are unchanged
+(and the US cheap-gas moat *strengthens*). Also: (a) the **fig1 gas-free H₂ line** is now
+evaluated on the full weather ensemble (`sys.n_mc_weather`, default 50) while the build is
+optimised on a 20-year subsample, fixing a fidelity asymmetry where it ran on just 6 synthetic
+years; (b) a **gas-stress reference line** (`gas_stress_mult`, default ×1.6 in the suite) and a
+**carbon-introduction lever** in the tornado make the asymmetric gas baseline (US flat $4/$0
+carbon) explicit (§7); (c) the duplicated gas-free-H₂ cost formula is unified into one shared
+function (`costs.h2_system_cost_split`, used by both the fig1/fig6 trajectory and the joint
+co-optimisation), locked by a regression test; (d) optional **P90 firm gas-sizing**
+(`firm_gas_sizing="p90"`), an explicit **solar `performance_ratio`** knob, and a **continuity
+tie-break diagnostic** (§8.4) round out the observability/robustness additions. All opt-in
+extras default off, so the headline = the recalibrated central.
 
 **v5.6 — geographic diversification, real-weather pipeline, config-driven sites
 (all opt-in; headline numbers unchanged).** Three usability/fidelity additions that the
@@ -236,27 +262,52 @@ the doublings since today, and apply the per-doubling cost decline. This is what
 cheaper than today in the model — and why solar (a fast-growing, fast-learning technology) falls
 furthest.*
 
-### Cumulative capacity trajectory
+### Cumulative capacity trajectory (S-curve, v5.7)
 
-$$Q_t = Q_0 + \sum_{i=1}^{t} \Delta Q_0 \cdot (1 + g)^i$$
+$$Q_t = Q_0 + \sum_{i=1}^{t} \Delta Q_0 \cdot \prod_{j=1}^{i}\big(1 + g_j\big),
+\qquad g_j = g_{\text{floor}} + (g_0 - g_{\text{floor}})\,\delta^{\,j-1}$$
 
-where $Q_0$ is cumulative installed capacity in 2025, $\Delta Q_0$ is 2025 annual additions, and $g$ is the growth rate of annual additions.
+where $Q_0$ is cumulative installed capacity in 2025, $\Delta Q_0$ is 2025 annual additions,
+$g_0$ is the year-1 growth rate of annual additions, and $\delta=$ `additions_growth_decay`
+shrinks that growth toward $g_{\text{floor}}$ each year. **Why the decay (v5.7):** real
+technology adoption is an S-curve, not perpetual compounding — the largest markets saturate and
+grid-integration limits bite. A *constant* $g$ (the pre-v5.7 model) ran solar to ≈38 TW
+cumulative by 2040, ~3–4× mainstream IEA WEO / BNEF NEO projections, which made the
+learning-curve cost decline implausibly fast at the long end. With $\delta=1$ the product
+collapses to the legacy $\Delta Q_0(1+g_0)^i$, so the formula is backward-compatible; the
+shipped technologies set $\delta=0.85$.
+
+**Best-guess central deployment (and its band).** The central path keeps near-term additions
+robust — developing-world electrification plus the AI-datacenter clean-power buildout — while
+letting growth taper. It lands the cumulatives (and the resulting 2040 doublings vs 2025) at:
+
+| Tech | $g_0$ | $\delta$ | 2030 | 2035 | **2040 central** | low ↔ high (2040) | 2040 doublings | 2040 LCOE |
+|------|-------|----------|------|------|------------------|-------------------|----------------|-----------|
+| Solar | 6%/yr | 0.85 | 6.7 TW | 11.0 TW | **15.6 TW** | ~11 ↔ ~22 TW | 2.42 | $21.9/MWh |
+| Wind  | 3%/yr | 0.85 | — | — | **4.2 TW**  | ~3 ↔ ~6 TW | 1.69 | $36.6/MWh |
+| Battery | 8%/yr | 0.85 | — | — | **14.5 TWh** | ~10 ↔ ~22 TWh | 3.01 | (×0.53 $/kWh) |
+
+The *low* and *high* columns bracket a slower-saturation / AI-supercharged range (vary $g_0$ by
+about ∓2 pts / +4 pts); they bound the learning-curve uncertainty. The fig1 *resource/siting*
+band (§9.3) and the tornado's **solar-learning** lever (§9) carry the cost-axis sensitivity that
+this range implies — a separate fig1 deployment band was deliberately not added (it would
+clutter the headline figure).
 
 ### Wright's Law
 
 $$\text{LCOE}(t) = \text{LCOE}_0 \cdot \left(\frac{Q_t}{Q_0}\right)^{\log_2(1-\text{LR})}$$
 
-**Verification:** For solar, $Q_{2040}/Q_{2025} = 38{,}466/2{,}900 = 13.3$ — corresponding to $\log_2(13.3) = 3.74$ doublings. With LR = 0.30, cost ratio = $(1-0.30)^{3.74} = 0.263$. So $\text{LCOE}_{2040} = 52 \times 0.263 = \$13.7$/MWh. ✓ (model output: $13.7/MWh)
+**Verification (v5.7 S-curve deployment):** For solar, $Q_{2040}/Q_{2025} = 15{,}557/2{,}900 = 5.36$ — corresponding to $\log_2(5.36) = 2.42$ doublings. With LR = 0.30, cost ratio = $(1-0.30)^{2.42} = 0.421$. So $\text{LCOE}_{2040} = 52 \times 0.421 = \$21.9$/MWh. ✓ (model output: $21.9/MWh)
 
 ### Solar LCOE trajectory (US, verified values)
 
 | Year | Cum. capacity (GW) | LCOE ($/MWh) |
 |------|--------------------|--------------|
 | 2025 | 2,900 | 52.0 |
-| 2028 | 5,496 | 37.4 |
-| 2030 | 7,940 | 31.0 |
-| 2035 | 18,077 | 20.3 |
-| 2040 | 38,466 | 13.7 |
+| 2028 | 5,069 | 39.0 |
+| 2030 | 6,660 | 33.9 |
+| 2035 | 10,972 | 26.2 |
+| 2040 | 15,557 | 21.9 |
 
 *These are the raw Wright's-Law learning-curve LCOEs (quoted at the legacy 7% WACC). v5.3
 re-annualises them at the solar/wind WACC of 5.5% via `rewacc_lcoe` (§8.3), multiplying the
@@ -265,16 +316,20 @@ delivered. The learning shape is unchanged (constant multiplier).*
 
 ### Technology learning parameters
 
-| Technology | LCOE₀ ($/MWh) | LR | Q₀ | ΔQ₀ | g |
-|------------|----------------|-----|-----|------|---|
-| Solar PV (US) | 52 | 30% | 2,900 GW | 650 GW/yr | 15%/yr |
-| Solar PV (EU) | 60 | 30% | 2,900 GW | 650 GW/yr | 15%/yr |
-| Onshore Wind (US) | 50 | 17% | 1,300 GW | 167 GW/yr | 10%/yr |
-| Onshore Wind (EU) | 48 | 17% | 1,300 GW | 167 GW/yr | 10%/yr |
-| LFP Battery (energy, US) | 180 $/kWh | 19% | 1,800 GWh | 600 GWh/yr | 18%/yr |
-| LFP Battery (power, US) | 140 $/kW | 19% | (same) | (same) | 18%/yr |
-| LFP Battery (energy, EU) | 180 $/kWh | 19% | 1,800 GWh | 600 GWh/yr | 18%/yr |
-| LFP Battery (power, EU) | 175 $/kW | 19% | (same) | (same) | 18%/yr |
+v5.7 deployment growth is $g_0$ (year-1 additions growth) with decay $\delta=0.85$ toward a
+floor of 0 (S-curve; see the trajectory section above). The pre-v5.7 constant rates were solar
+15% / wind 10% / battery 18% with no decay.
+
+| Technology | LCOE₀ ($/MWh) | LR | Q₀ | ΔQ₀ | g₀ · δ |
+|------------|----------------|-----|-----|------|--------|
+| Solar PV (US) | 52 | 30% | 2,900 GW | 650 GW/yr | 6%/yr · 0.85 |
+| Solar PV (EU) | 60 | 30% | 2,900 GW | 650 GW/yr | 6%/yr · 0.85 |
+| Onshore Wind (US) | 50 | 17% | 1,300 GW | 167 GW/yr | 3%/yr · 0.85 |
+| Onshore Wind (EU) | 48 | 17% | 1,300 GW | 167 GW/yr | 3%/yr · 0.85 |
+| LFP Battery (energy, US) | 180 $/kWh | 19% | 1,800 GWh | 600 GWh/yr | 8%/yr · 0.85 |
+| LFP Battery (power, US) | 140 $/kW | 19% | (same) | (same) | 8%/yr · 0.85 |
+| LFP Battery (energy, EU) | 180 $/kWh | 19% | 1,800 GWh | 600 GWh/yr | 8%/yr · 0.85 |
+| LFP Battery (power, EU) | 175 $/kW | 19% | (same) | (same) | 8%/yr · 0.85 |
 
 **Battery cost basis (v5).** Installed cost is split into an **energy** component
 ($/kWh, scales with MWh) and a **power/BOS/EPC** component ($/kW, scales with MW).
@@ -822,6 +877,58 @@ plots both delivered-cost trajectories: in the EU at 90% RE green-H₂ firming c
 ≈ +$24–40/MWh, a premium that **narrows over time** as the EU carbon price makes gas
 firming dearer (the pure-gas reference rises to cross the RE+H₂ delivered cost ≈ 2036).
 
+**Firm CLEAN baseload firming — geothermal & hydro (opt-in, `--firming geothermal|hydro`, v5.7).**
+The same "a power plant with X" trick extends to firm *zero-carbon* resources some sites enjoy:
+**geothermal** (e.g. Iceland) and **abundant hydro** (e.g. Norway, the Alps). Both reuse the
+gas cost formula with $\varepsilon_g=0$ and **zero fuel**, but with infrastructure-grade capital
+(long life, low WACC) and a high baseload CF — so they are firm, dispatchable, and clean.
+Standalone delivered cost (via `gas_pure_lcoe(·, cf)`), **sourced to IRENA *Renewable Power
+Generation Costs in 2023*** (installed cost) and computed through the model's own per-tech WACC:
+**geothermal ≈ \$63/MWh** (\$4,589/kW, CF 0.88, FOM \$130/kW-yr, 30 yr, 6% WACC) and **hydro ≈
+\$46/MWh** (\$2,806/kW, CF 0.55, 40 yr, 5% WACC). These land just below IRENA's *published* 2023
+LCOEs (\$71 geothermal / \$57 hydro, quoted at IRENA's ~7.5% WACC) — the gap is the lower cost of
+capital, the same `rewacc`-style consistency the model applies to the imported Lazard LCOEs.
+*Caveat:* the hydro CF (0.55, not an "always-on" 0.85) reflects that a real reservoir is
+energy-limited (seasonal inflow); 0.85 would give an over-optimistic ~\$30. Both presets
+(`GEOTHERMAL`, `HYDRO`) remain adjustable, and feed the EU-siting comparison (§ below).
+
+### 7.2b Where to site in Europe — clean-power comparison (`tools/build_eu_siting.py`)
+
+A practical question the model can answer: *which EU locations give the cheapest 24/7
+carbon-free datacenter power?* `build_eu_siting.py` (`make eu-siting`) scores a curated set of
+candidate sites on **one metric — delivered firm zero-carbon \$/MWh** — letting each use its best
+clean resource: sun+wind sites build the gas-free solar+wind+LFP+green-H₂ system (§7.6) on **real
+ERA5** weather (re-anchoring the imported LCOE to the site CF, as in `build_locations`); geothermal
+and hydro sites run on the firm-clean baseload above. It emits a ranked bar chart
+(`figs/eu_siting.png`) and a **map** (`figs/eu_siting_map.png`; cartopy coastlines/borders, with a
+plain lon/lat-scatter fallback when cartopy is absent) plus `output/eu_siting_results.json`.
+
+**Result (2030, delivered \$/MWh, real ERA5 2018–2024):** firm clean baseload wins decisively —
+Nordic/Alpine **hydro ≈ \$46** (Norway, Sweden, the Alps) and Iceland **geothermal ≈ \$63** beat
+every build-it-yourself sun+wind site and sit far below gas (EU ~\$125). Among sun+wind sites the
+**Canary Islands (Lanzarote, ≈\$104)** lead on steady trade winds (wind CF ≈0.42) + strong sun,
+then windy **Jutland (≈\$114)**; the calmer Mediterranean sun sites (Sicily/Crete ≈\$140) trail.
+For the sun+wind sites the chart/table also report the cheaper **85% RE + gas** build (firm solar+
+wind+battery with EU gas on the residual ~15%) — not zero-carbon, but the gap to the full-clean
+cost is the premium for the last ~15% of emissions. Candidates are chosen as *promising* clean-power
+sites, not typical markets. Each sun+wind figure reflects the exact ERA5 grid cell at the chosen
+lat/lon, so very localized wind regimes (e.g. the Tarifa jet) can be under-captured — the ranking is
+directional; re-fetch a precise point to site-tune.
+
+**Pumped-storage firming (v5.7).** The six countries with pumped-hydro topography (Spain, Portugal,
+Italy, Greece, Switzerland, Romania) firm their solar+wind with **PHS** (§7.5) instead of green H₂
+(hexagon markers on the map). The effect is large: the Mediterranean PHS sites fall to **Tarifa
+\$82, Heraklion/Crete \$86, Sines \$89, Gela/Sicily \$91** (2030, real ERA5) — well below the
+H₂-firmed sites (Lanzarote \$104, Jutland \$114, Dover \$116) and approaching the firm
+hydro (\$46) / geothermal (\$63) leaders. Most striking: **Crete and Sicily are *infeasible* at
+85% RE+gas** (too little wind for an 85%-variable-RE firm build) **yet become cheap, fully
+zero-carbon with PHS** — its 0.80 round-trip firms low-wind solar across multi-day gaps where green
+H₂ (0.35) and gas cannot economically. The converse also shows: **Switzerland (\$118) and Romania
+(\$121)** have the PHS topography but weaker local solar/wind, so PHS alone doesn't make them cheap —
+their real edge is firm *conventional* hydro generation, not RE+storage. So the model's verdict is
+nuanced and defensible: PHS is transformative **only where good RE *and* pumped-storage terrain
+coincide** — which is exactly the Iberian/Mediterranean sun + sierra combination.
+
 **Pure gas reference** (CCGT at 85% CF, verified values):
 
 | | US | EU 2025 | EU 2030 | EU 2035 |
@@ -832,6 +939,18 @@ firming dearer (the pure-gas reference rises to cross the RE+H₂ delivered cost
 
 *(v5.3: gas financed at a 9% WACC — slightly higher capex recovery than the legacy
 flat 7%, which raised the pure-gas reference by ≈$2.4/MWh US and ≈$2.4–3/MWh EU.)*
+
+**Gas-baseline asymmetry & the "gas-stress" reference line (v5.7).** The headline holds gas
+fuel flat (US $4/MMBtu with **$0 carbon to 2040**; EU $10/MMBtu). That makes US gas a very low,
+very *stable* floor — which is *why* US high-RE struggles to cross it — but it is an assumption,
+not a fact: Henry Hub has ranged $2–9, AI-datacenter demand is a real upward pressure, and a US
+carbon price is a policy possibility. Two transparency features make this visible. (a) The suite
+plots a **gas-stress reference line** (`gas_stress_mult`, default ×1.6 → US ≈$62/MWh, EU
+≈$153/MWh in 2025) — the same plant at a stressed fuel price, a dot-dashed line on fig1; US
+70%-RE crosses *it* by ~2030 even though it never crosses the $4 baseline. (b) The **tornado**
+(§9) includes a *gas-price ∓25%* lever and a *carbon-introduction* lever (+$40/tCO₂), which for
+the US is the single largest mover of the parity gap. The point: the robust US conclusion is
+"cheap *flat* gas is hard to beat," and that conclusion is contingent on gas staying cheap.
 
 ### 7.3 Carbon price trajectories
 
@@ -881,6 +1000,26 @@ and is that cheaper than **buying** green H₂? The `--ldes` overlay answers thi
 genuine **2-storage chronological dispatch**: at the no-LDES optimal build, LFP keeps the
 diurnal cycle while self-produced H₂ charges from otherwise-curtailed surplus and discharges
 through multi-day Dunkelflaute.
+
+**Pumped hydro storage (PHS) — the `phs` LDES preset (v5.7).** PHS is the dominant grid
+storage worldwide and the cheap multi-day firming option wherever topography + (ideally
+existing) reservoirs allow — Switzerland, Italy, Spain, Portugal, Greece, Romania, Norway.
+Crucially it is a round-trip **store**, not a generator (pump water up with RE surplus,
+regenerate ~80% later through a reversible pump-turbine), so it lives in the LDES tier, *not*
+as a firm-clean generation preset. It is **sourced** to NREL ATB (2022–24) and DOE/PNNL
+Mongird et al. (2020): round-trip efficiency **0.80** (range 70–87%), all-in CAPEX
+**\$1,999–5,505/kW** (the range *is* the site quality; the low end = existing-reservoir sites,
+the "untapped" EU case), FOM **\$18/kW-yr**, durations 8–12 h; decomposed (an assumption, from
+the all-in \$/kW) into a reversible powerhouse ~\$1,200/kW (pump \$700 + turbine \$500) and a
+cheap energy/reservoir component \$60/kWh. Its **~50-yr life** (vs ~20 yr for batteries) is
+credited via a new `life_yr` field on `BatteryParams`, so the LDES cost path amortises PHS over
+50 yr rather than writing it off over the 20-yr project horizon (~29% cheaper annualised — a
+material, correct adjustment). **Lazard does not usefully cover PHS** — its storage analysis is
+lithium-ion-centric; the authoritative cost data is NREL ATB + PNNL/Mongird, and for the
+*untapped EU potential* specifically the JRC EU-PHS assessment and the ANU Global Pumped Hydro
+Atlas. Run via `--ldes phs` / `--ldes-joint phs`; it firms the six PHS-potential siting
+candidates (§7.2b). Because PHS's 0.80 round-trip beats green H₂'s ~0.35, far less RE overbuild
+is wasted, so RE+PHS is markedly cheaper than RE+H₂ where the topography exists (see §7.2b).
 
 **Tail handling — no blackouts, by assumption.** The firming turbine *always* has fuel: it
 burns self-produced H₂ when the store has it and **purchased green H₂ (market) otherwise**.
@@ -959,9 +1098,12 @@ zero-carbon system can be read directly against the gas it displaces. The line t
 roughly the cost of the constrained 90%-RE-with-gas case (and *below* the cost of forcing RE
 past 90% with gas), because it is free to choose a solar-heavy, big-electrolyser mix instead of
 the wind-heavy Dunkelflaute hedge. EU trajectory (from `output/eu_firm_results.json`,
-`h2_system`): **$148/MWh (2025) → $99 (2035) → $85 (2040)**, crossing below pure gas around
-**2029** as EU carbon climbs (US: $138 → $79). These numbers are now exported and
-regenerable (`tools/regen_doc_tables.py`), not hand-transcribed.
+`h2_system`): **$149/MWh (2025) → $110 (2035) → $101 (2040)**, crossing below pure gas around
+**2030** as EU carbon climbs (US: $140 → $94). (v5.7: these are now evaluated on the full
+50-year weather ensemble — the build is optimised on a 20-year subsample — fixing the v5.6
+fidelity asymmetry where the line ran on just 6 synthetic years; and they sit higher than v5.6
+because the deployment recalibration lifts deep-future solar/electrolyser-input costs.) These
+numbers are exported and regenerable (`tools/regen_doc_tables.py`), not hand-transcribed.
 
 *Robustness (verified).* Fixing B_lfp at 6h is benign — letting `run_ldes_joint` choose it
 freely lands at 5.5h (2025) → 6.0h (2040), within 0.5h across the trajectory, and the
@@ -1156,6 +1298,13 @@ central headline numbers are unchanged.
 | `syn_persistence` | 0.82 (US), 0.85 (EU) | Yes | Synoptic AR(1) φ; episode length ≈ 1/(1−φ) days |
 | `n_sites` | 1 | Yes | Geographic portfolio size (§4.7); 1 = single-site headline |
 | `site_synoptic_corr` | 0.70 | Yes | Pairwise cross-site Dunkelflaute correlation $c$ (§4.7); used only if `n_sites`>1 |
+| `firm_gas_sizing` | "mean" | Yes | Firm gas-plant sizing: "mean" annual-peak (headline) or "p90" 1-in-10 peak (v5.7, §7) |
+| `solar_performance_ratio` | 1.0 | Yes | Solar system PR (v5.7); 1.0 = CF anchored to the imported-LCOE basis; <1 derates (§4.2) |
+
+Per-technology deployment (`TechParams`/`BatteryParams`): `additions_growth_rate` ($g_0$),
+`additions_growth_decay` ($\delta$, **0.85** for shipped solar/wind/battery; 1.0 = legacy
+constant growth), and `additions_growth_floor` (0) define the S-curve cumulative-capacity path
+(§3). The LDES presets leave $\delta=1$ (their conservative learning is documented separately).
 
 **Custom sites & real weather (data, not code).** Two seams let a user re-point the model
 without editing source. `load_site_config(path)` (CLI `--site PATH.json`) builds a region
@@ -1180,16 +1329,21 @@ numbers for any valuable datacenter. (Tables regenerated from the export via
 
 | RE target | 2025 ($/MWh) | 2030 | 2035 | 2040 | vs gas 2025 | Crossover |
 |-----------|-------------|------|------|------|-------------|-----------|
-| 70% | 73.9 | 58.5 | 48.6 | 40.4 | +61% | ~2036 |
-| 80% | 83.4 | 60.9 | 48.6 | 40.5 | +81% | ~2036 |
-| 85% | 92.3 | 68.4 | 55.1 | 45.6 | +100% | ~2040 |
-| 90% | 126.4 | 94.7 | 75.3 | 62.4 | +174% | >2040 |
+| 70% | 73.9 | 60.7 | 54.3 | 50.5 | +61% | >2040 |
+| 80% | 83.4 | 64.4 | 55.6 | 50.5 | +81% | >2040 |
+| 85% | 92.3 | 71.8 | 62.5 | 57.0 | +100% | >2040 |
+| 90% | 126.4 | 99.2 | 86.4 | 77.6 | +174% | >2040 |
 | **Gas** | **46.1** | **46.1** | **46.1** | **46.1** | — | — |
 
-High-RE US still never beats gas within the horizon — cheap untaxed gas ($4/MMBtu → ~$46/MWh
-even at a 9% WACC) is a very low baseline, and high-RE needs heavy wind overbuild to ride out
-multi-day lulls. With the v5.5 CF-consistent resource the moderate-RE builds need less
-overbuild, so **70–80% RE now reach parity ~2036 and 85% ~2040**; 90% remains >2040.
+High-RE US never beats cheap untaxed gas within the horizon — $4/MMBtu → ~$46/MWh even at a
+9% WACC is a very low, very stable baseline, and high-RE needs heavy wind overbuild to ride
+out multi-day lulls. **Under the v5.7 deployment recalibration this conclusion strengthens:**
+the less-aggressive learning curve (solar cumulative S-curves to ~15.6 TW by 2040 rather than
+the old 38 TW) lifts the deep-future RE cost, so even **moderate 70–80% RE no longer crosses
+$46 gas by 2040** (the 70% line bottoms at ≈$50/MWh) — where pre-v5.7 it reached parity in the
+mid-2030s. The crossing returns only against a stressed gas baseline (the dot-dashed +60%-fuel
+reference line on fig1, ≈$62/MWh, which 70% RE beats by ~2030) — i.e. US RE competitiveness
+hinges on gas *not* staying at $4 forever.
 
 **95% RE is omitted: it is infeasible for a firm, battery-only off-grid system.** Over the
 whole 21³ build grid the maximum achievable annual RE fraction is ≈**0.94 (EU)** / ≈**0.95 (US)**:
@@ -1204,25 +1358,29 @@ exceeds this ceiling, rather than silently reporting the penalty-saturated point
 
 | RE target | 2025 ($/MWh) | 2030 | 2035 | 2040 | vs gas 2025 | Crossover |
 |-----------|-------------|------|------|------|-------------|-----------|
-| 70% | 98.6 | 85.4 | 78.5 | 72.0 | −13% | **~2025** |
-| 80% | 107.3 | 87.4 | 79.8 | 74.3 | −6% | **~2025** |
-| 85% | 118.5 | 92.8 | 82.1 | 74.7 | +4% | **~2026** |
-| 90% | 156.1 | 120.1 | 101.8 | 88.0 | +37% | **~2029** |
+| 70% | 98.6 | 88.9 | 85.4 | 83.8 | −13% | **~2025** |
+| 80% | 107.3 | 90.6 | 86.6 | 84.3 | −6% | **~2025** |
+| 85% | 118.5 | 96.9 | 90.9 | 87.5 | +4% | **~2026** |
+| 90% | 156.1 | 125.4 | 113.6 | 106.5 | +37% | **~2030** |
 | **Gas** | **113.8** | **125.2** | **148.3** | **162.6** | — | — |
 
 EU gas is expensive and rising (carbon → logistic path toward $200/tCO₂). An always-on RE
-datacenter beats gas from ~2025 at 70–80% RE; **90% RE reaches parity ~2029** under the v5.5 CF
-recalibration (vs ~2033 before). The earlier history still holds — v4 claimed "90% parity
-Q2 2025", and the honesty fixes (no free load-shedding, multi-day Dunkelflaute, a resolved
-optimiser, no free demand-deferral) pushed that out to the 2030s; v5.5 then corrects the
-*opposite* error (a CF below the imported cost basis) and pulls 90% back to the late 2020s.
+datacenter beats gas from ~2025 at 70–80% RE; **90% RE reaches parity ~2030** (the v5.7
+deployment recalibration nudges this a year later than the pre-v5.7 ~2029, as the
+less-aggressive learning curve lifts the late-2020s RE cost — but rising EU carbon still does
+most of the work, so the conclusion is unchanged). The earlier history still holds — v4 claimed
+"90% parity Q2 2025", and the honesty fixes (no free load-shedding, multi-day Dunkelflaute, a
+resolved optimiser, no free demand-deferral) pushed that out to the 2030s; v5.5 corrected the
+*opposite* error (a CF below the imported cost basis) pulling 90% back toward the late 2020s,
+and v5.7 settles it at ~2030 with a defensible deployment trajectory.
 (95% RE omitted — infeasible for the battery-only firm system, see the US note above.)
 
 **Optimal EU 90% RE build (2025):** ≈ **6.4× solar + 5.0× wind + 6h storage** — roughly half
 the nameplate overbuild of the pre-v5.5 ~11× solar + 10× wind, because the CF-consistent
 resource (solar 0.16 / wind 0.29) generates the same energy from far less capacity. Storage
 stays ~6h: the binding constraint is multi-day Dunkelflaute energy, which generation overbuild
-covers more cheaply than batteries.
+covers more cheaply than batteries. (The 2025 build is unchanged from v5.5/v5.6 — the
+deployment recalibration only changes *future* unit costs, not the year-0 optimum.)
 
 ### Why so much overbuild but only ~6h of battery?
 
@@ -1320,15 +1478,19 @@ headline resource, so it defines the published numbers.)
 ### Accuracy summary — what to trust
 
 Treat this as a **stylised techno-economic model: trust directional comparisons, not absolute
-numbers to better than ~±20–30%.** Robust conclusions: cheap untaxed US gas is hard to beat at
-high RE (90%+ never crosses), though moderate-RE US reaches parity by the late 2030s; carbon-priced
-EU gas is beatable, with parity moving from ~2025 (70–80% RE) to ~2029 (90% RE); ≥95% RE is
+numbers to better than ~±20–30%.** Robust conclusions: cheap untaxed US gas is hard to beat —
+under the v5.7 deployment recalibration **no RE target crosses flat $4 gas within the horizon**
+(the moat *strengthens*), and US RE wins only if gas rises (the stressed-gas line); carbon-priced
+EU gas is beatable, with parity moving from ~2025 (70–80% RE) to ~2030 (90% RE); ≥95% RE is
 infeasible for the battery-only firm system (~94% ceiling), needing LDES/H₂ to close;
 high-RE economics are overbuild-and-gas-dominated, not battery-dominated; and demand
 flexibility only helps when compute is worth less than gas — i.e. rarely for premium AI. Not to
 be trusted as precise: specific parity *years* and $/MWh (synthetic uncalibrated weather, my own
-battery-cost basis, learning-rate extrapolation to 2040, a single site). The biggest lever to
-tighten accuracy is replacing the synthetic weather with real multi-year ERA5/NSRDB reanalysis.
+battery-cost basis, and the **deployment/learning extrapolation to 2040** — v5.7 puts the
+central deployment on a defensible S-curve, ~15.6 TW solar, but the low↔high band in §3 still
+spans ~±$5–10/MWh at 2040, and the assumed flat US gas price is a comparable swing). The biggest
+remaining lever to tighten accuracy is replacing the synthetic weather with real multi-year
+ERA5/NSRDB reanalysis.
 
 ---
 

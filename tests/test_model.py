@@ -38,11 +38,28 @@ def _tiny_sim(workload=None, grid_steps=4, n_mc=4, seed=0,
 # ── 1. Cost-trajectory formulas (documented "verified" values) ────────────────
 
 def test_wrights_law_solar_trajectory():
+    # v5.7: deployment additions grow with a *decaying* rate (S-curve), so cumulative
+    # solar lands ~15.6 TW by 2040 (not the old constant-growth 38 TW) and the learning-
+    # curve LCOE decline is correspondingly less aggressive at the long end.
     cum = m.cumulative_capacity(m.SOLAR, 15)
     lcoe = m.wright_law(m.SOLAR.lcoe_today, m.SOLAR.cumulative_gw_2025, cum,
                         m.SOLAR.learning_rate)
-    for yr, exp in {0: 52.0, 3: 37.4, 5: 31.0, 10: 20.3, 15: 13.7}.items():
+    for yr, exp in {0: 52.0, 3: 39.0, 5: 33.9, 10: 26.2, 15: 21.9}.items():
         assert abs(lcoe[yr] - exp) < 0.1, f"solar LCOE {2025+yr}: {lcoe[yr]} != {exp}"
+    # cumulative stays well below the old implausible constant-growth path
+    assert 14_000 < cum[15] < 17_000, f"2040 cumulative solar {cum[15]:.0f} GW off target"
+
+
+def test_deployment_decay_reduces_to_legacy_when_off():
+    # additions_growth_decay=1.0 must reproduce the legacy constant-growth formula exactly.
+    legacy = m.replace(m.SOLAR, additions_growth_rate=0.15, additions_growth_decay=1.0)
+    cum = m.cumulative_capacity(legacy, 15)
+    import numpy as np
+    ref = np.empty(16); ref[0] = legacy.cumulative_gw_2025
+    for i in range(1, 16):
+        ref[i] = ref[i-1] + legacy.annual_additions_gw * (1.0 + 0.15) ** i
+    assert np.allclose(cum, ref)
+    assert abs(cum[15] - 38466) < 1.0                      # the old 38 TW path
 
 
 def test_carbon_trajectory_eu_logistic():
@@ -108,6 +125,54 @@ def test_h2_system_optimises_and_is_zero_carbon():
     assert all(0.0 <= out["buy_frac"][i] <= 1.0 for i in range(4))
 
 
+def test_h2_cost_paths_share_one_formula():
+    """The gas-free H₂ system cost is computed by ONE shared formula
+    (`costs.h2_system_cost_split`), used by both `h2system._costs` (the fig1/fig6
+    trajectory) and `analysis.run_ldes_joint`. Lock that `_costs` delegates to it so the
+    two paths can never drift apart (they previously duplicated the math)."""
+    import numpy as np
+    from lcoe.params import REGIONS, LDES_PRESETS, GAS_H2
+    from lcoe.h2system import _costs, _B_LFP
+    from lcoe.costs import (cumulative_capacity, wright_law, rewacc_lcoe, crf,
+                            h2_system_cost_split)
+    from lcoe.weather import solar_clearsky, generate_weather_year
+    from lcoe.dispatch import dispatch_h2_vec
+    cfg = REGIONS["eu"]; batt = cfg["battery"]; ldes = LDES_PRESETS["h2"]
+    n = cfg["sys"].project_lifetime_yr; i = 8
+    ls = rewacc_lcoe(wright_law(cfg["solar"].lcoe_today, cfg["solar"].cumulative_gw_2025,
+            cumulative_capacity(cfg["solar"], 15), cfg["solar"].learning_rate), cfg["solar"])[i]
+    lw = rewacc_lcoe(wright_law(cfg["wind"].lcoe_today, cfg["wind"].cumulative_gw_2025,
+            cumulative_capacity(cfg["wind"], 15), cfg["wind"].learning_rate), cfg["wind"])[i]
+    cum_b = cumulative_capacity(batt, 15)
+    lfp_kwh = float(wright_law(batt.capex_kwh_today, batt.cumulative_gwh_2025, cum_b, batt.learning_rate)[i])
+    lfp_kw = float(wright_law(batt.capex_kw_today, batt.cumulative_gwh_2025, cum_b, batt.learning_rate)[i])
+    ch = float(wright_law(ldes.capex_kw_today, ldes.cumulative_gwh_2025,
+                          cumulative_capacity(ldes, 15), ldes.learning_rate)[i])
+    h2buy = GAS_H2.gas_price_mmbtu * GAS_H2.ccgt_heat_rate + GAS_H2.vom_mwh
+    crf_l = crf(ldes.wacc, n); annuity = (1 - (1 + ldes.wacc) ** (-n)) / ldes.wacc
+    cs = solar_clearsky(cfg["mean_irr"]); rng = np.random.default_rng(0)
+    S = np.array([generate_weather_year(cs, cfg["mean_wind_ms"], rng, -0.35, 0.5, 0.85)[0] for _ in range(4)])
+    W = np.array([generate_weather_year(cs, cfg["mean_wind_ms"], rng, -0.35, 0.5, 0.85)[1] for _ in range(4)])
+    ctx = dict(batt=batt, ldes=ldes, n=n, sol2d=S, win2d=W, CF_sol=float(S.mean()),
+               CF_win=float(W.mean()), lcoe_sol=ls, lcoe_win=lw, om_sol=cfg["solar"].om_frac_lcoe,
+               om_win=cfg["wind"].om_frac_lcoe, lfp_kwh=lfp_kwh, lfp_kw=lfp_kw, ch_capex=ch,
+               e_capex=ldes.capex_kwh_today, dis_capex=ldes.discharge_capex_kw,
+               h2_buy_base=h2buy, crf_l=crf_l, annuity=annuity)
+    x = np.array([7.0, 2.0, 1.0, 120.0])
+    total_costs, comp_costs, resid = _costs(x, ctx)
+    # independent direct call to the shared helper at the same design + dispatch
+    lfp_pow = 1.0 if _B_LFP <= 4.0 else min(1.0, 4.0 / _B_LFP)
+    r2, efc2 = dispatch_h2_vec(S, W, 7.0, 2.0, _B_LFP, lfp_pow, batt.roundtrip_efficiency,
+                               120.0, 1.0, 1.0, ldes.roundtrip_efficiency)
+    comp_direct = h2_system_cost_split(7.0, 2.0, _B_LFP, 1.0, 120.0, r2, efc2, batt=batt,
+        ldes=ldes, n=n, CF_sol=float(S.mean()), CF_win=float(W.mean()), lcoe_sol=ls,
+        lcoe_win=lw, om_sol=cfg["solar"].om_frac_lcoe, om_win=cfg["wind"].om_frac_lcoe,
+        lfp_kwh=lfp_kwh, lfp_kw=lfp_kw, ch_capex=ch, e_capex=ldes.capex_kwh_today,
+        dis_capex=ldes.discharge_capex_kw, h2_buy=h2buy, crf_l=crf_l, annuity=annuity)
+    assert abs(total_costs - sum(comp_direct.values())) < 1e-9
+    assert comp_costs == comp_direct
+
+
 def test_ldes_cost_and_overlay():
     """LDES cost rises with storage/power; the 2-storage overlay displaces gas
     (more LDES energy → lower gas fraction at a fixed deficit-prone build)."""
@@ -150,12 +215,49 @@ def test_dispatch_h2_vec_residual_falls_with_capacity():
     assert 0.0 <= big <= small <= 1.0 and big < small
 
 
+def test_phs_preset_and_life_crediting():
+    """Pumped hydro storage (v5.7): registered LDES preset, high RTE (0.80) and a long
+    (50-yr) asset life that the LDES cost path amortises over — so it isn't written off
+    over the 20-yr project horizon."""
+    import numpy as np
+    from lcoe.costs import ldes_annual_cost
+    assert "phs" in m.LDES_PRESETS and m.LDES_PHS.roundtrip_efficiency == 0.80
+    assert m.LDES_PHS.life_yr == 50
+    # life_yr is honoured: amortising over 50 yr is cheaper than over 20 yr (same WACC).
+    over50 = ldes_annual_cost(m.LDES_PHS, 24, 60.0, 700.0, 500.0, 1.0, 1.0, 0.055, 20, 0.3)
+    no_life = m.replace(m.LDES_PHS, life_yr=None)
+    over20 = ldes_annual_cost(no_life, 24, 60.0, 700.0, 500.0, 1.0, 1.0, 0.055, 20, 0.3)
+    assert over50 < over20, "50-yr life should amortise cheaper than the 20-yr project horizon"
+    # batteries (no life_yr) fall back to the project life — unchanged behaviour
+    assert m.BATTERY_US.life_yr is None
+
+
 def test_ldes_presets():
     # tanks are the default (no cavern); cavern is much cheaper energy; asymmetric power
     assert m.LDES_H2.capex_kwh_today == 20.0          # above-ground tanks
     assert m.LDES_H2_CAVERN.capex_kwh_today < 1.0     # salt cavern ~$0.6/kWh
     assert m.LDES_H2.charge_power_mw < m.LDES_H2.discharge_power_mw  # small electrolyser
-    assert set(m.LDES_PRESETS) == {"iron-air", "h2", "h2-cavern"}
+    assert set(m.LDES_PRESETS) == {"iron-air", "h2", "h2-cavern", "phs"}
+
+
+def test_firm_clean_firming_presets():
+    """Geothermal & hydro firming: firm, zero-carbon, no fuel, flat over time; cheap
+    delivered LCOE at their baseload CF; registered for --firming."""
+    assert m.GEOTHERMAL.carbon_intensity_ccgt == 0.0 and m.GEOTHERMAL.gas_price_mmbtu == 0.0
+    assert m.HYDRO.carbon_intensity_ccgt == 0.0 and m.HYDRO.gas_price_mmbtu == 0.0
+    geo = m.gas_pure_lcoe(m.GEOTHERMAL, 0, m.GEOTHERMAL.wacc, cf=0.88)
+    hyd = m.gas_pure_lcoe(m.HYDRO, 0, m.HYDRO.wacc, cf=0.55)
+    # IRENA 2023 capex; LCOE at the model's own WACC sits just below IRENA's published
+    # LCOE ($71 geothermal / $57 hydro, at IRENA's ~7.5% WACC).
+    assert 55.0 < geo < 72.0, f"geothermal LCOE {geo:.1f} out of band"
+    assert 40.0 < hyd < 58.0, f"hydro LCOE {hyd:.1f} out of band"
+    # flat over time (no fuel/carbon escalation)
+    assert abs(geo - m.gas_pure_lcoe(m.GEOTHERMAL, 15, m.GEOTHERMAL.wacc, cf=0.88)) < 1e-6
+    # zero-carbon → cheaper than its carbon term would ever add; and cf param defaults to 0.85
+    assert m.FIRMING_PRESETS["geothermal"] is m.GEOTHERMAL
+    assert m.FIRMING_PRESETS["hydro"] is m.HYDRO
+    # gas_pure_lcoe default cf unchanged (backward-compat)
+    assert abs(m.gas_pure_lcoe(m.GAS, 0, m.GAS.wacc) - m.gas_pure_lcoe(m.GAS, 0, m.GAS.wacc, cf=0.85)) < 1e-9
 
 
 def test_h2_firming_preset():
@@ -474,6 +576,16 @@ def test_weather_years_hook_overrides_synthetic():
     assert abs(sim.interp3(sim.gas_mean, 0.0, 0.0, 0.0) - 1.0) < 1e-9
 
 
+def test_opt_re_reported_and_feasible():
+    """run_simulation reports the achieved renewable fraction (opt_re) at each optimum; a
+    feasible target is met (≈ ≥ target), so callers can detect infeasible high-RE builds."""
+    r = _quick_sim(5.5, 7.5, years=0, R=0.80, seed=4)
+    sc = r["scenarios"][0.80]
+    assert "opt_re" in sc
+    assert 0.0 <= sc["opt_re"][0] <= 1.0
+    assert sc["opt_re"][0] >= 0.78, f"feasible 80% target not met: {sc['opt_re'][0]:.3f}"
+
+
 def test_resource_presets_consistent():
     """`default` resource must equal the region's headline resource; `good` is
     strictly more energetic on both axes."""
@@ -712,6 +824,60 @@ def test_re_monotonicity_enforced():
     assert list(a) == [50., 48., 48.]                    # adopts the cheaper feasible slice
     assert res["scenarios"][0.70]["opt_csol"][1] == 3.0  # ...and its build, only where needed
     assert res["scenarios"][0.70]["opt_csol"][0] == 2.0  # untouched where already monotone
+
+
+def test_firm_gas_sizing_p90_at_least_mean():
+    """The P90 firm gas-sizing option sizes the backup to the 1-in-10 annual peak, which
+    is pointwise ≥ the mean-annual-peak surface, so it never lowers the firm delivered cost."""
+    import numpy as np
+    sim = _tiny_sim(grid_steps=5, n_mc=6)
+    assert hasattr(sim, "gas_peak_firm_p90")
+    assert np.all(sim.gas_peak_firm_p90 >= sim.gas_peak_firm_mean - 1e-9)
+    cum = m.cumulative_capacity(m.SOLAR, 0)
+    ls = m.wright_law(m.SOLAR.lcoe_today, m.SOLAR.cumulative_gw_2025, cum, m.SOLAR.learning_rate)[0]
+    lw = m.wright_law(m.WIND.lcoe_today, m.WIND.cumulative_gw_2025,
+                      m.cumulative_capacity(m.WIND, 0), m.WIND.learning_rate)[0]
+    sim_p90 = _tiny_sim(grid_steps=5, n_mc=6,
+                        sysp=m._sys_with(m.SYSTEM, grid_steps=5, n_mc_weather=6,
+                                         firm_gas_sizing="p90"))
+    kw = dict(batt=m.BATTERY_US, capex_batt_kwh=180.0, capex_batt_kw=140.0,
+              gas=m.GAS, year_index=0)
+    mean = m.optimal_cost_3d(sim, 0.80, ls, lw, sys=sim.sys, **kw)[0]
+    p90 = m.optimal_cost_3d(sim_p90, 0.80, ls, lw, sys=sim_p90.sys, **kw)[0]
+    assert p90 >= mean - 0.5 and m.SYSTEM.firm_gas_sizing == "mean"   # default unchanged
+
+
+def test_solar_performance_ratio():
+    import numpy as np
+    base = m.solar_clearsky(5.5, 1.0).mean()
+    der = m.solar_clearsky(5.5, 0.8).mean()
+    # PR scales the clear-sky mean (≈, modulo the summer-noon clip at CF=1.0)
+    assert abs(der / base - 0.8) < 0.02
+    assert m.SYSTEM.solar_performance_ratio == 1.0          # default = cost-basis-anchored
+    # a PR<1 lowers the simulated effective solar CF in the dispatch
+    s1 = _tiny_sim(grid_steps=4, n_mc=3)
+    s08 = _tiny_sim(grid_steps=4, n_mc=3,
+                    sysp=m._sys_with(m.SYSTEM, grid_steps=4, n_mc_weather=3,
+                                     solar_performance_ratio=0.8))
+    assert s08.sol_cf_mean < s1.sol_cf_mean
+
+
+def test_gas_stress_reference():
+    """The gas-stress reference baseline is the same plant at a higher fuel price; it sits
+    above the headline gas baseline and is a reference only (not in the optimisation)."""
+    import numpy as np
+    res = m.run_simulation(
+        solar=m.SOLAR, wind=m.WIND, battery=m.BATTERY_US, gas=m.GAS, smr=m.SMR,
+        sys=m._sys_with(m.SYSTEM, grid_steps=5, n_mc_weather=3), workload=m.FIRM,
+        mean_irr=5.5, mean_wind_ms=7.5, years=1, reliabilities=[0.80], seed=1,
+        gas_stress_mult=1.6)
+    assert "gas_stress" in res and np.all(res["gas_stress"] > res["gas_pure"])
+    # default run carries no stress line (opt-in only)
+    res0 = m.run_simulation(
+        solar=m.SOLAR, wind=m.WIND, battery=m.BATTERY_US, gas=m.GAS, smr=m.SMR,
+        sys=m._sys_with(m.SYSTEM, grid_steps=5, n_mc_weather=3), workload=m.FIRM,
+        mean_irr=5.5, mean_wind_ms=7.5, years=1, reliabilities=[0.80], seed=1)
+    assert "gas_stress" not in res0
 
 
 # ── runner ────────────────────────────────────────────────────────────────────

@@ -126,7 +126,7 @@ Workload presets (`--workload`): `firm` (always-on, 0% shed) · `enterprise` (5%
 
 ### 4. Run the US vs. EU Comparison Plot
 
-Regenerates the firm US-vs-Europe **70%-RE** trajectory against each region's gas baseline (and annotates any EU/gas crossover). EU 70% RE is already below gas from 2025, so no crossover point is drawn; the US 70% line crosses its much cheaper gas baseline only in the mid-2030s:
+Regenerates the firm US-vs-Europe **70%-RE** trajectory against each region's gas baseline (and annotates any EU/gas crossover). EU 70% RE is already below gas from 2025; the US 70% line, under the v5.7 deployment recalibration, **never crosses the flat $4/MMBtu US gas baseline within the horizon** (it bottoms at ≈$50/MWh) — it would cross only a stressed-gas baseline:
 
 ```bash
 PYTHONPATH=. python scratch/plot_comparison.py
@@ -223,23 +223,37 @@ So premium/AI workloads ($v_{\text{shed}}$ high) never shed and collapse to the 
 
 Tables regenerable via `tools/regen_doc_tables.py` from `output/*_results.json`. These are the relevant numbers for any valuable datacenter (premium/AI workloads never shed and collapse to firm). Gas baseline: US flat ~$46/MWh; EU rising from $114 (2025) to $163 (2040) as carbon prices climb. Simulated capacity factors: US solar 0.23 / wind 0.33, EU 0.16 / 0.29 — consistent with the Lazard CF basis of the imported LCOEs.
 
+> **v5.7 deployment recalibration.** Learning curves are now driven by an **S-curve** deployment trajectory (additions growth *decays*), landing solar ≈15.6 TW / wind ≈4.2 TW / batteries ≈14.5 TWh cumulative by 2040 — vs the old constant-growth 38 TW / 7 TW / 45 TWh that was ~3–4× mainstream IEA/BNEF and made deep-future RE too cheap. **2025 numbers and builds are unchanged** (only future unit costs rise). Net: deep-future RE costs lift ~25–40% at 2040, so **US high-RE no longer crosses cheap flat gas within the horizon** (the moat strengthens; RE wins only against the stressed-gas reference line), and **EU 90% parity shifts ~2029→~2030**. Directional conclusions unchanged.
+
 > **A firm, battery-only off-grid system tops out at ~94% RE** (≈0.94 EU / ≈0.95 US over the whole build grid): during a multi-day Dunkelflaute neither sun nor wind produces and a long battery can't deliver enough power to bridge days, so a few percent of annual energy always falls to gas. The suite therefore reports up to 90% RE; pushing higher needs long-duration storage or H₂ firming (the `--ldes` / `--firming h2` overlays and `fig6`). Requesting a target above the ceiling triggers an explicit infeasibility warning.
 
 > **On-grid reference.** Every trajectory/reliability figure and the summary also plot a **Grid + renewable-PPA** line — the realistic alternative of staying on the grid and signing a renewable PPA (all-in ≈ \$75/MWh US, \$117/MWh EU in 2025, declining with the solar learning curve). It sits *below* the off-grid high-RE optimum in both regions, making explicit that **going off-grid is itself a cost premium**. A second line, **Grid + 24/7 CFE**, adds a premium for hour-by-hour carbon-free matching (≈\$115/MWh US, \$172/MWh EU in 2025). Both are annual-vs-hourly reference lines — not part of the optimisation.
 
 ### US — 90% RE
 
-* **2025 LCOE:** $126.4/MWh; **2040:** $62.4/MWh. **Parity (90% RE): >2040.** But **70–80% RE reach parity ~2036**, and **85% ~2040**, as the CF-consistent build needs less overbuild.
-* *Why?* Extremely cheap, untaxed US gas (~$46/MWh even at a 9% WACC) is a moat clean energy still can't cross within the horizon at *high* RE fractions, where heavy wind overbuild is needed for multi-day lulls.
+* **2025 LCOE:** $126.4/MWh; **2040:** $77.6/MWh. **Parity: >2040 at every RE target** (70% bottoms at ≈$50/MWh — above the $46 flat-gas baseline).
+* *Why?* Extremely cheap, untaxed US gas (~$46/MWh even at a 9% WACC) is a moat clean energy can't cross within the horizon — and the v5.7 deployment recalibration (less-aggressive late-horizon learning) *widens* it, removing the moderate-RE mid-2030s crossings of earlier versions. US RE wins only against the **stressed-gas** reference (×1.6 fuel ≈$62/MWh), which 70% RE beats by ~2030 — i.e. competitiveness hinges on gas not staying at $4.
 
 ### Europe — 90% RE
 
-* **2025 LCOE:** $156.1/MWh; **2040:** $88.0/MWh. **Parity: ~2029** (70–80% RE reach parity ~2025; **85% ~2026**).
-* *Why?* Expensive, carbon-taxed EU gas makes RE competitive — and with a CF-consistent resource the always-on build that rides out week-long Dunkelflaute reaches 90% parity by the **late 2020s**.
+* **2025 LCOE:** $156.1/MWh; **2040:** $106.5/MWh. **Parity: ~2030** (70–80% RE reach parity ~2025; **85% ~2026**).
+* *Why?* Expensive, carbon-taxed EU gas makes RE competitive — and with a CF-consistent resource the always-on build that rides out week-long Dunkelflaute reaches 90% parity by ~2030 (v5.7 nudges this a year later than the pre-recalibration ~2029, but rising EU carbon still does most of the work).
 
 ### If the compute is cheap (interruptible)
 
 For low-value/spot compute, shedding the most expensive hours helps a lot: in the `--flex-sweep` (EU 90% RE, 2030), a 95%-interruptible workload valued at $25/MWh sees delivered cost fall to ~$32/MWh (parity by 2025) versus ~$174/MWh fully firm. (The flex-sweep runs at reduced fidelity — coarser grid, wider bounds — so its firm corner reads above the §11 headline of ~$120; treat the *shape* of the trade-off, not the absolute, as the point.) Premium AI ($900/MWh) sheds nothing and stays firm.
+
+### Where in Europe to build (siting comparison)
+
+`tools/build_eu_siting.py` (`make eu-siting`) ranks candidate EU locations by the **cheapest 24/7 carbon-free delivered cost**, letting each site use its best clean resource: sun+wind sites build the gas-free solar+wind+battery+green-H₂ system (on **real ERA5** weather), while geothermal/hydro sites run on firm zero-carbon baseload (`--firming geothermal|hydro`). It writes a ranked bar chart (`figs/eu_siting.png`) and a **map** (`figs/eu_siting_map.png`, cartopy; falls back to a plain scatter if cartopy is absent).
+
+The candidates are **concrete named points** (a real plant/site, not a country centroid), chosen as *promising* clean-power locations. Headline (2030, delivered $/MWh): **firm clean baseload wins decisively** — reservoir **hydro ≈ $46** (Aurland in W. Norway, Harsprånget on Sweden's Lule River, Kaprun in the Austrian Alps, Buksefjord near Nuuk in Greenland) and Iceland **geothermal ≈ $63** (Hellisheiði) beat the best build-it-yourself sun+wind sites and crush gas (EU ~$125). Among sun+wind sites **Lanzarote (Canary Is., ≈$104)** leads — steady NE trade winds (wind CF ≈0.42) plus strong sun — then windy **Thisted (NW Jutland, ≈$114)** and **Dover Strait (≈$116)**, where the English Channel's strong wind complements moderate solar; the calmer Mediterranean sun sites (Gela/Heraklion ≈$140) trail. For the sun+wind sites the chart/table also show the cheaper **85% RE + gas** build (a diamond on each bar) — not zero-carbon, but the gap to the full-clean bar is the premium for eliminating the last ~15% of emissions.
+
+(On **Greenland**: it is *hydro* country — ~800,000 GWh/yr gross potential — not a high-enthalpy geothermal system like Iceland; it has only marginal low-temperature geothermal prospects, e.g. Tunu in the east, so it enters as a hydro point.)
+
+**Pumped hydro storage (PHS) firming.** Six countries with the topography (and existing reservoirs) for cheap **pumped storage** — Spain, Portugal, Italy, Greece, Switzerland, Romania — firm their solar+wind with PHS (a new LDES preset, `--ldes phs`) instead of green H₂. PHS is a round-trip *store*, not a generator: ~80% round-trip efficiency (vs H₂'s ~35%) and a ~50-year life, sourced to NREL ATB (2022–24) + DOE/PNNL Mongird (2020). The effect is large — the Mediterranean PHS sites drop to **Tarifa $82, Heraklion (Crete) $86, Sines $89, Gela (Sicily) $91** in 2030, well below the H₂-firmed sites (Lanzarote $104, Jutland $114) and approaching the firm hydro/geothermal leaders. Strikingly, **Crete and Sicily — *infeasible* at 85% RE+gas without wind — become cheap and fully zero-carbon with PHS**, because its high round-trip efficiency firms low-wind solar across multi-day gaps. (Switzerland $118 / Romania $121 show the converse: PHS topography without strong local solar/wind doesn't help much — there the edge is firm *conventional* hydro generation instead.) **Lazard does not usefully cover PHS** (its storage analysis is lithium-ion-centric); for the untapped EU potential see JRC and the ANU Global Pumped Hydro Atlas.
+
+The geothermal/hydro costs are **sourced to IRENA's *Renewable Power Generation Costs in 2023*** (installed cost $4,589/kW geothermal, $2,806/kW hydro) computed through the model's own per-technology WACC, landing just below IRENA's published LCOEs ($71 geothermal, $57 hydro — the gap is the lower cost of capital). *Caveats:* hydro uses CF 0.55 (a real reservoir is energy-limited, so it can't run flat-out as firm baseload); and each sun+wind number reflects the exact ERA5 grid cell at the chosen lat/lon, so very localized wind regimes (e.g. the Tarifa jet) can be under-captured — treat the ranking as directional and re-fetch a precise point to site-tune.
 
 ---
 

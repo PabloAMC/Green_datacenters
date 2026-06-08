@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """End-to-end simulation runner and region orchestration."""
 import os
+from dataclasses import replace
 from typing import Dict, List, Optional
 
 import matplotlib.pyplot as plt
@@ -64,6 +65,7 @@ def run_simulation(
     h2_system: bool         = False,
     weather_years: Optional[list] = None,
     resource_band: Optional[list] = None,
+    gas_stress_mult: Optional[float] = None,
 ) -> Dict:
     if reliabilities is None:
         reliabilities = [0.80, 0.90]
@@ -84,6 +86,15 @@ def run_simulation(
     capex_batt_kw  = wright_law(battery.capex_kw_today,  battery.cumulative_gwh_2025, cum_batt, battery.learning_rate)
     lcoe_smr       = smr_trajectory(smr, years)
     gas_pure       = np.array([gas_pure_lcoe(gas, i, gas.wacc) for i in range(years + 1)])
+    # Optional "gas-stress" reference baseline: the same gas plant at a stressed fuel
+    # price (e.g. AI-demand-driven tightening). A transparency line — the headline holds
+    # gas fuel flat (US $4/MMBtu, $0 carbon), which makes US gas a very low, very stable
+    # floor; this shows how the comparison shifts if that assumption is relaxed. Reference
+    # only, never part of the optimisation. (§7 / §12.)
+    gas_stress = None
+    if gas_stress_mult is not None:
+        gas_s = replace(gas, gas_price_mmbtu=gas.gas_price_mmbtu * gas_stress_mult)
+        gas_stress = np.array([gas_pure_lcoe(gas_s, i, gas_s.wacc) for i in range(years + 1)])
 
     sim      = ChronologicalSimulator(sys, battery, workload, mean_irr, mean_wind_ms, seed,
                                       weather_years=weather_years)
@@ -128,6 +139,9 @@ def run_simulation(
         results["grid_ppa_name"] = grid_ppa.name
         results["grid_cfe"] = grid_cfe_trajectory(grid_ppa, lcoe_solar)
         results["grid_cfe_name"] = "Grid + 24/7 CFE"
+    if gas_stress is not None:
+        results["gas_stress"] = gas_stress
+        results["gas_stress_name"] = f"{gas.name} (stressed fuel ×{gas_stress_mult:g})"
 
     for R in reliabilities:
         n_yr = years + 1
@@ -135,9 +149,11 @@ def run_simulation(
         opt_cg = np.zeros(n_yr); opt_cs = np.zeros(n_yr); opt_cb = np.zeros(n_yr)
         opt_cp = np.zeros(n_yr); opt_shed = np.zeros(n_yr)
         opt_csol = np.zeros(n_yr); opt_cwin = np.zeros(n_yr); opt_B = np.zeros(n_yr)
+        opt_re = np.zeros(n_yr)   # achieved renewable fraction at the optimum (firm: 1−f_gas)
         gen_cx = np.zeros(n_yr); gen_om = np.zeros(n_yr)
         bat_cx = np.zeros(n_yr); bat_om = np.zeros(n_yr)
         gas_cx = np.zeros(n_yr); gas_op = np.zeros(n_yr); gas_cb = np.zeros(n_yr)
+        tiebreak_diag = {}   # continuity tie-break observability (§8.4)
 
         for i in range(n_yr):
             kw = dict(batt=battery, capex_batt_kwh=capex_batt_kwh[i],
@@ -147,7 +163,7 @@ def run_simulation(
 
             (opt_t[i], opt_cg[i], opt_cs[i], opt_cb[i], opt_cp[i],
              opt_csol[i], opt_cwin[i], opt_B[i], opt_shed[i]) = optimal_cost_3d(
-                sim, R, lcoe_solar[i], lcoe_wind[i], prev_x=prev_x, **kw)
+                sim, R, lcoe_solar[i], lcoe_wind[i], prev_x=prev_x, diag=tiebreak_diag, **kw)
 
             # Per-factor capex/opex decomposition at the optimum (central unit costs)
             split = delivered_cost_split(
@@ -158,6 +174,10 @@ def run_simulation(
             bat_cx[i] = split["batt_capex"]; bat_om[i] = split["batt_om"]
             gas_cx[i] = split["gas_capex"]; gas_op[i] = split["gas_opex"]
             gas_cb[i] = split["gas_carbon"]
+            # Achieved renewable fraction at the optimum (firm, no shed: 1 − gas energy
+            # fraction). Lets callers detect when a high RE target was infeasible at a
+            # poor-resource site (the returned build is then the penalty optimum, < target).
+            opt_re[i] = 1.0 - sim.interp3(sim.gas_mean, opt_csol[i], opt_cwin[i], opt_B[i])
 
             # Cost uncertainty: hold optimal (C_sol, C_win, B) fixed from the
             # central solve; re-evaluate cost formula with lognormal-perturbed
@@ -210,13 +230,19 @@ def run_simulation(
                     sim, R, lcoe_solar[i], lcoe_wind[i],
                     use_p90=True, prev_x=prev_x, **kw)
 
+        if tiebreak_diag.get("fired"):
+            d = tiebreak_diag["deltas"]
+            print(f"  [diag] {R:.0%} RE: continuity tie-break fired {tiebreak_diag['fired']}/"
+                  f"{n_yr-1} yrs; cost change {min(d):+.2f}…{max(d):+.2f} $/MWh "
+                  f"(≤1% bound; suppresses cosmetic mix flips, §8.4).")
+
         scen = {
             "opt_delivered": opt_t, "opt_delivered_low": opt_l, "opt_delivered_high": opt_h,
             "opt_cg": opt_cg, "opt_cs": opt_cs, "opt_cb": opt_cb, "opt_cp": opt_cp,
             "opt_shed": opt_shed,
             "gen_capex": gen_cx, "gen_om": gen_om, "batt_capex": bat_cx, "batt_om": bat_om,
             "gas_capex": gas_cx, "gas_opex": gas_op, "gas_carbon": gas_cb,
-            "opt_csol": opt_csol, "opt_cwin": opt_cwin, "opt_B": opt_B,
+            "opt_csol": opt_csol, "opt_cwin": opt_cwin, "opt_B": opt_B, "opt_re": opt_re,
         }
         if design_p90:
             scen["opt_delivered_p90"] = opt_t_p90
@@ -291,7 +317,8 @@ def _nearest_re(results, target: float) -> float:
 
 def run_region(region, solar, wind, battery, gas, smr, sys, workload,
                mean_irr, mean_wind_ms, reliabilities, prefix, seed=0, grid_ppa=None,
-               design_p90=False, h2_system=False, weather_years=None, resource_band=None):
+               design_p90=False, h2_system=False, weather_years=None, resource_band=None,
+               gas_stress_mult=None):
     print(f"\n{'━'*42} {region} {'━'*42}")
     results = run_simulation(
         solar=solar, wind=wind, battery=battery, gas=gas, smr=smr,
@@ -299,6 +326,7 @@ def run_region(region, solar, wind, battery, gas, smr, sys, workload,
         mean_wind_ms=mean_wind_ms, reliabilities=reliabilities, seed=seed,
         grid_ppa=grid_ppa, design_p90=design_p90, h2_system=h2_system,
         weather_years=weather_years, resource_band=resource_band,
+        gas_stress_mult=gas_stress_mult,
     )
     print_summary(results, region=region)
     export_results(results, region=region, prefix=prefix)
@@ -327,7 +355,7 @@ def run_region(region, solar, wind, battery, gas, smr, sys, workload,
 def run_region_cfg(cfg, workload, reliabilities, prefix,
                    sys_overrides=None, seed=42, design_p90=False,
                    mean_irr=None, mean_wind_ms=None, gas=None, h2_system=False,
-                   weather_years=None, resource_band=None):
+                   weather_years=None, resource_band=None, gas_stress_mult=None):
     """Run a region BUNDLE (a REGIONS-style dict) with a chosen workload.
 
     Shared by `run_region_key` (built-in regions) and the `--site` path (a custom
@@ -343,13 +371,14 @@ def run_region_cfg(cfg, workload, reliabilities, prefix,
                       cfg["mean_wind_ms"] if mean_wind_ms is None else mean_wind_ms,
                       reliabilities, prefix, seed=seed, grid_ppa=cfg.get("grid_ppa"),
                       design_p90=design_p90, h2_system=h2_system,
-                      weather_years=weather_years, resource_band=resource_band)
+                      weather_years=weather_years, resource_band=resource_band,
+                      gas_stress_mult=gas_stress_mult)
 
 
 def run_region_key(region_key, workload, reliabilities, prefix,
                    sys_overrides=None, seed=42, design_p90=False,
                    mean_irr=None, mean_wind_ms=None, gas=None, h2_system=False,
-                   weather_years=None, resource_band=False):
+                   weather_years=None, resource_band=False, gas_stress_mult=None):
     """Run a region (from REGIONS) with a chosen workload; thin wrapper over run_region_cfg.
 
     `mean_irr` / `mean_wind_ms` override the region's default resource (used by the
@@ -362,7 +391,7 @@ def run_region_key(region_key, workload, reliabilities, prefix,
                           sys_overrides=sys_overrides, seed=seed, design_p90=design_p90,
                           mean_irr=mean_irr, mean_wind_ms=mean_wind_ms, gas=gas,
                           h2_system=h2_system, weather_years=weather_years,
-                          resource_band=band)
+                          resource_band=band, gas_stress_mult=gas_stress_mult)
 
 
 def run_full_suite():
@@ -379,10 +408,13 @@ def run_full_suite():
     # the maximum achievable RE is ≈0.94 (EU) / ≈0.95 (US). Pushing past ~94% requires
     # long-duration storage or H₂ firming — see the --ldes / --firming h2 overlays (fig6).
     reliabilities = [0.70, 0.80, 0.85, 0.90]
+    # gas_stress_mult=1.6: a transparency reference line showing the gas baseline at a
+    # 60%-higher fuel price (e.g. AI-demand-driven tightening) — the headline holds gas
+    # fuel flat, so this makes the "cheap-gas moat" assumption visible (§7 / §12).
     run_region_key("us", FIRM, reliabilities, prefix="us_firm", seed=42,
-                   h2_system=True, resource_band=True)
+                   h2_system=True, resource_band=True, gas_stress_mult=1.6)
     run_region_key("eu", FIRM, reliabilities, prefix="eu_firm", seed=42,
-                   h2_system=True, resource_band=True)
+                   h2_system=True, resource_band=True, gas_stress_mult=1.6)
     print("\nDone — figures saved in figs/")
 
 
