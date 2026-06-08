@@ -559,6 +559,16 @@ def test_weather_years_hook_overrides_synthetic():
     assert abs(sim.interp3(sim.gas_mean, 0.0, 0.0, 0.0) - 1.0) < 1e-9
 
 
+def test_opt_re_reported_and_feasible():
+    """run_simulation reports the achieved renewable fraction (opt_re) at each optimum; a
+    feasible target is met (≈ ≥ target), so callers can detect infeasible high-RE builds."""
+    r = _quick_sim(5.5, 7.5, years=0, R=0.80, seed=4)
+    sc = r["scenarios"][0.80]
+    assert "opt_re" in sc
+    assert 0.0 <= sc["opt_re"][0] <= 1.0
+    assert sc["opt_re"][0] >= 0.78, f"feasible 80% target not met: {sc['opt_re'][0]:.3f}"
+
+
 def test_resource_presets_consistent():
     """`default` resource must equal the region's headline resource; `good` is
     strictly more energetic on both axes."""

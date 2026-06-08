@@ -149,6 +149,7 @@ def run_simulation(
         opt_cg = np.zeros(n_yr); opt_cs = np.zeros(n_yr); opt_cb = np.zeros(n_yr)
         opt_cp = np.zeros(n_yr); opt_shed = np.zeros(n_yr)
         opt_csol = np.zeros(n_yr); opt_cwin = np.zeros(n_yr); opt_B = np.zeros(n_yr)
+        opt_re = np.zeros(n_yr)   # achieved renewable fraction at the optimum (firm: 1−f_gas)
         gen_cx = np.zeros(n_yr); gen_om = np.zeros(n_yr)
         bat_cx = np.zeros(n_yr); bat_om = np.zeros(n_yr)
         gas_cx = np.zeros(n_yr); gas_op = np.zeros(n_yr); gas_cb = np.zeros(n_yr)
@@ -173,6 +174,10 @@ def run_simulation(
             bat_cx[i] = split["batt_capex"]; bat_om[i] = split["batt_om"]
             gas_cx[i] = split["gas_capex"]; gas_op[i] = split["gas_opex"]
             gas_cb[i] = split["gas_carbon"]
+            # Achieved renewable fraction at the optimum (firm, no shed: 1 − gas energy
+            # fraction). Lets callers detect when a high RE target was infeasible at a
+            # poor-resource site (the returned build is then the penalty optimum, < target).
+            opt_re[i] = 1.0 - sim.interp3(sim.gas_mean, opt_csol[i], opt_cwin[i], opt_B[i])
 
             # Cost uncertainty: hold optimal (C_sol, C_win, B) fixed from the
             # central solve; re-evaluate cost formula with lognormal-perturbed
@@ -237,7 +242,7 @@ def run_simulation(
             "opt_shed": opt_shed,
             "gen_capex": gen_cx, "gen_om": gen_om, "batt_capex": bat_cx, "batt_om": bat_om,
             "gas_capex": gas_cx, "gas_opex": gas_op, "gas_carbon": gas_cb,
-            "opt_csol": opt_csol, "opt_cwin": opt_cwin, "opt_B": opt_B,
+            "opt_csol": opt_csol, "opt_cwin": opt_cwin, "opt_B": opt_B, "opt_re": opt_re,
         }
         if design_p90:
             scen["opt_delivered_p90"] = opt_t_p90

@@ -907,9 +907,13 @@ plain lon/lat-scatter fallback when cartopy is absent) plus `output/eu_siting_re
 Nordic/Alpine **hydro ≈ \$46** (Norway, Sweden, the Alps) and Iceland **geothermal ≈ \$63** beat
 every build-it-yourself sun+wind site and sit far below gas (EU ~\$125). Among sun+wind sites the
 **Canary Islands (Lanzarote, ≈\$104)** lead on steady trade winds (wind CF ≈0.42) + strong sun,
-then windy **Jutland (≈\$114)**; cloudy/calm markets (Germany ≈\$168) trail. Each sun+wind figure
-reflects the exact ERA5 grid cell at the chosen lat/lon, so very localized wind regimes (e.g. the
-Tarifa jet) can be under-captured — the ranking is directional; re-fetch a precise point to site-tune.
+then windy **Jutland (≈\$114)**; the calmer Mediterranean sun sites (Sicily/Crete ≈\$140) trail.
+For the sun+wind sites the chart/table also report the cheaper **85% RE + gas** build (firm solar+
+wind+battery with EU gas on the residual ~15%) — not zero-carbon, but the gap to the full-clean
+cost is the premium for the last ~15% of emissions. Candidates are chosen as *promising* clean-power
+sites, not typical markets. Each sun+wind figure reflects the exact ERA5 grid cell at the chosen
+lat/lon, so very localized wind regimes (e.g. the Tarifa jet) can be under-captured — the ranking is
+directional; re-fetch a precise point to site-tune.
 
 **Pure gas reference** (CCGT at 85% CF, verified values):
 

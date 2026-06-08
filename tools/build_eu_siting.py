@@ -38,9 +38,10 @@ import matplotlib.pyplot as plt
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from lcoe.params import REGIONS, GEOTHERMAL, HYDRO, _sys_with, MODEL_VERSION  # noqa: E402
+from lcoe.params import REGIONS, GEOTHERMAL, HYDRO, FIRM, _sys_with, MODEL_VERSION  # noqa: E402
 from lcoe.costs import gas_pure_lcoe                                          # noqa: E402
 from lcoe.h2system import h2_system_trajectory                               # noqa: E402
+from lcoe.simulate import run_simulation                                     # noqa: E402
 from lcoe.weather import load_weather_traces                                 # noqa: E402
 from lcoe.reporting import git_commit                                        # noqa: E402
 from tools.build_locations import cf_consistent_techs                        # noqa: E402
@@ -65,11 +66,6 @@ CANDIDATES = [
      "Atlantic sun + coastal wind"),
     ("Jutland (Denmark)", "jutland", "re", 2.8, 9.0, 56.5, 8.2, None,
      "North Sea wind, weak sun — wind-dominated"),
-    # Context: two typical big EU markets (same RE+H₂ metric)
-    ("Germany (typical)", "germany", "re", 3.0, 6.8, 51.0, 10.0, None,
-     "reference: a typical northern-EU datacenter market (reuses committed ERA5)"),
-    ("Spain (Madrid)", "spain", "re", 5.0, 6.2, 40.0, -3.7, None,
-     "reference: central Spain (reuses committed ERA5)"),
     # ── Firm zero-carbon baseload ────────────────────────────────────────────────
     ("Iceland (geothermal)", "iceland", "geothermal", 2.2, 8.0, 64.1, -21.9, 0.88,
      "firm high-enthalpy geothermal — runs 24/7, no overbuild needed"),
@@ -118,8 +114,8 @@ def score_site(cand, grid_steps=15, n_mc=20, seed=42):
                 for i in range(YEARS + 1)]
         return {"label": label, "slug": slug, "resource": res, "lat": lat, "lon": lon,
                 "note": note, "years": [2025 + i for i in range(YEARS + 1)],
-                "delivered": lcoe, "cf_base": cf_base, "weather": "n/a (firm baseload)",
-                "cf_solar": None, "cf_wind": None}
+                "delivered": lcoe, "re85_gas": None, "cf_base": cf_base,
+                "weather": "n/a (firm baseload)", "cf_solar": None, "cf_wind": None}
 
     # RE site: fully gas-free solar+wind+LFP+green-H₂ system, at the site's resource.
     npz = _era5_path(slug)
@@ -133,9 +129,22 @@ def score_site(cand, grid_steps=15, n_mc=20, seed=42):
         wsrc = f"ERA5 {ERA5_YEARS[0]}-{ERA5_YEARS[-1]}"
     h2 = h2_system_trajectory(solar_t, wind_t, reg["battery"], irr, wind, sysp,
                               YEARS, seed=seed, n_mc=n_mc, weather_years=weather_years)
+    # The cheaper, NOT-fully-clean alternative: a firm 85%-renewable solar+wind+battery
+    # build with EU gas covering the residual ~15% (the standard main-model optimisation).
+    sim = run_simulation(solar=solar_t, wind=wind_t, battery=reg["battery"], gas=reg["gas"],
+                         smr=reg["smr"], sys=sysp, workload=FIRM, mean_irr=irr,
+                         mean_wind_ms=wind, years=YEARS, reliabilities=[0.85], seed=seed,
+                         weather_years=weather_years)
+    sc85 = sim["scenarios"][0.85]
+    re85 = [round(float(v), 2) for v in sc85["opt_delivered"]]
+    # Achieved renewable fraction — at low-wind sites an 85%-VARIABLE-RE firm build hits the
+    # solar+battery wall (infeasible), and the returned cost is a penalty optimum, not a real
+    # 85% build. Flag those so the figure/table don't show a misleading number.
+    re85_re = [round(float(v), 3) for v in sc85["opt_re"]]
     return {"label": label, "slug": slug, "resource": res, "lat": lat, "lon": lon,
             "note": note, "years": [2025 + i for i in range(YEARS + 1)],
             "delivered": [round(float(v), 2) for v in h2["lcoe"]],
+            "re85_gas": re85, "re85_re": re85_re,
             "buy_frac": [round(float(v), 3) for v in h2["buy_frac"]],
             "weather": wsrc, "cf_solar": round(cf_s, 3) if cf_s else None,
             "cf_wind": round(cf_w, 3) if cf_w else None}
@@ -155,17 +164,37 @@ def build_figure(results, mi):
     ax.invert_yaxis()
     for yi, v in zip(y, vals):
         ax.text(v + 1.5, yi, f"${v:.0f}", va="center", fontsize=8.5)
+    # For sun+wind sites, overlay the cheaper 85%-RE + gas build (not zero-carbon) as a
+    # diamond — the gap to the bar end is the premium for going fully carbon-free.
+    has85 = False
+    for yi, r in zip(y, rows):
+        v85 = r.get("re85_gas")
+        feasible = r.get("re85_re") and r["re85_re"][j] >= 0.83   # 85% target actually met
+        if v85 is not None and feasible:
+            has85 = True
+            ax.plot(v85[j], yi, marker="D", color="#333", ms=7, zorder=6,
+                    markeredgecolor="white", markeredgewidth=0.7)
+            ax.text(v85[j], yi - 0.34, f"${v85[j]:.0f}", va="bottom", ha="center",
+                    fontsize=7, color="#333")
+        elif r["resource"] == "re":   # 85% variable-RE infeasible here (too little wind)
+            ax.text(r["delivered"][j] + 9, yi, "85% RE infeasible (low wind)",
+                    va="center", fontsize=6.5, color="#999", style="italic")
     # gas reference lines (the dirty alternative)
     eu_gas = REGIONS["eu"]["gas"]; us_gas = REGIONS["us"]["gas"]
     g_eu = gas_pure_lcoe(eu_gas, j, eu_gas.wacc); g_us = gas_pure_lcoe(us_gas, j, us_gas.wacc)
     ax.axvline(g_eu, color="#6B705C", ls="--", lw=1.5, label=f"EU gas {mi} (${g_eu:.0f})")
     ax.axvline(g_us, color="#999999", ls=":", lw=1.5, label=f"US gas {mi} (${g_us:.0f})")
     from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
     handles = [Patch(color=COL["re"], label="Solar+wind+battery+green-H₂ (gas-free)"),
                Patch(color=COL["geothermal"], label="Geothermal (firm)"),
                Patch(color=COL["hydro"], label="Hydro (firm)")]
+    if has85:
+        handles.append(Line2D([0], [0], marker="D", color="w", markerfacecolor="#333",
+                              markeredgecolor="white", markersize=8,
+                              label="Same site at 85% RE + gas (15% gas; not zero-carbon)"))
     leg1 = ax.legend(handles=handles, loc="lower right", fontsize=8, frameon=True,
-                     facecolor="white", framealpha=1, title="Clean resource")
+                     facecolor="white", framealpha=1, title="Build option")
     ax.add_artist(leg1)
     ax.legend(loc="upper right", fontsize=8, frameon=True, facecolor="white", framealpha=1)
     real = any(r.get("weather", "").startswith("ERA5") for r in results)
@@ -264,8 +293,9 @@ def main(argv=None):
         r = score_site(cand, grid_steps=args.grid_steps, n_mc=args.mc)
         results.append(r)
         j = args.year - 2025
+        extra = (f"  | 85% RE+gas ${r['re85_gas'][j]:5.0f}" if r.get("re85_gas") else "")
         print(f"  {r['label']:<26} {r['resource']:<10} {args.year}: ${r['delivered'][j]:5.0f}/MWh"
-              f"  ({r['weather']})")
+              f"{extra}  ({r['weather']})")
 
     os.makedirs(os.path.join(ROOT, "figs"), exist_ok=True)
     fig = build_figure(results, args.year)

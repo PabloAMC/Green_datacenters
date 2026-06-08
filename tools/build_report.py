@@ -303,11 +303,20 @@ def siting_section():
     res_label = {"re": "solar + wind + battery + green-H₂", "geothermal": "geothermal (firm)",
                  "hydro": "hydro (firm)"}
     rows = sorted(d["sites"], key=lambda r: r["delivered"][j])
+
+    def _re85(r):
+        if not r.get("re85_gas"):
+            return "—"                                   # firm clean (geothermal/hydro)
+        if r.get("re85_re") and r["re85_re"][j] >= 0.83:
+            return "$%.0f" % r["re85_gas"][j]
+        return "<span style='color:#999'>infeasible*</span>"   # low-wind: hits the solar wall
     body = "".join(
         f"<tr><th>{r['label']}</th><td>{res_label[r['resource']]}</td>"
-        f"<td class='cx'>${r['delivered'][j]:.0f}</td></tr>" for r in rows)
+        f"<td class='cx'>${r['delivered'][j]:.0f}</td><td>{_re85(r)}</td></tr>"
+        for r in rows)
     table = ("<table><thead><tr><th>Location</th><th>Cheapest clean resource</th>"
-             f"<th>{yr} $/MWh</th></tr></thead><tbody>{body}</tbody></table>")
+             f"<th>{yr} $/MWh (zero-carbon)</th><th>85% RE + gas</th></tr></thead>"
+             f"<tbody>{body}</tbody></table>")
     src = "real ERA5 weather" if d.get("weather") == "real ERA5" else "illustrative resource"
     cheapest = rows[0]
     return (
@@ -318,10 +327,17 @@ def siting_section():
         'sites with firm zero-carbon resources — <b>geothermal</b> (Iceland) or abundant '
         '<b>hydro</b> (Norway, Sweden, the Alps) — simply run on that.</p>'
         f'<p><b>Firm clean baseload wins decisively.</b> Nordic/Alpine <b>hydro (~${cheapest["delivered"][j]:.0f}/MWh)</b> '
-        'and Icelandic <b>geothermal (~$58)</b> beat every build-it-yourself sun-and-wind site '
+        'and Icelandic <b>geothermal (~$63)</b> beat every build-it-yourself sun-and-wind site '
         'and sit far below gas. Among sun + wind sites the <b>Canary Islands</b> lead (steady '
-        'trade winds + strong sun), then windy <b>Jutland</b>; cloudy/calm markets like Germany '
-        f'trail. ({yr}, firm · {src}.)</p>'
+        'trade winds + strong sun), then windy <b>Jutland</b>. For those sun + wind sites the '
+        'chart and table also show a cheaper <b>85% renewable + gas</b> build (the diamond on '
+        'each bar / the last column) — not zero-carbon, but the gap to the full-clean bar is the '
+        f'premium for eliminating that last ~15% of emissions. ({yr}, firm · {src}.)</p>'
+        '<p style="font-size:13.5px">*A notable finding: at <b>low-wind</b> sites (Crete, Sicily) '
+        'an 85%-<i>renewable</i> firm build is <b>infeasible</b> — without wind, solar + battery '
+        'hits a wall around ~80% and can\'t bridge multi-day gaps — so there the fully zero-carbon '
+        'green-H₂ build (which optimises freely and buys H₂ for the rare deficits) is actually the '
+        '<b>cheaper</b> clean option. Wind is what makes cheap high-renewable possible.</p>'
         + _fig_box(mapfig) + table +
         (_fig_box(barfig) if barfig else "") +
         '<p class="sub" style="font-size:13px">Each sun + wind figure reflects the exact ERA5 grid '
