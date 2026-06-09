@@ -372,13 +372,18 @@ def siting_section():
         'flat sites where the clean firming (H₂) is itself expensive (Jutland, Dover); where PHS makes '
         'clean firming cheap, the <b>100%-zero-carbon build beats 75%-RE-plus-gas</b> — carbon-taxed gas '
         'is no longer a cheap fallback.</p>'
-        + ('<div class="figs"><figure><img src="' + map_h2 + '" alt="EU siting map, '
-           'green-hydrogen firming"><figcaption>If firmed by <b>green hydrogen</b> — works at '
-           'every site (H₂ needs no terrain).</figcaption></figure>'
-           '<figure><img src="' + map_phs + '" alt="EU siting map, pumped-storage firming">'
-           '<figcaption>If firmed by <b>pumped storage</b> — only where the ANU atlas shows '
-           'reservoir terrain (flat sites omitted); much cheaper where available. Same colour '
-           'scale as the H₂ map.</figcaption></figure></div>')
+        # Two maps STACKED (one below the other), each full width.
+        + ('<figure style="margin:1em 0;background:#fff;border:1px solid var(--line);'
+           'border-radius:8px;padding:10px"><img src="' + map_h2 + '" style="width:100%" '
+           'alt="EU siting map, green-hydrogen firming"><figcaption style="font-size:12.5px;'
+           'color:var(--muted);margin-top:6px">If firmed by <b>green hydrogen</b> — works at every '
+           'site (H₂ needs no terrain).</figcaption></figure>'
+           '<figure style="margin:1em 0;background:#fff;border:1px solid var(--line);'
+           'border-radius:8px;padding:10px"><img src="' + map_phs + '" style="width:100%" '
+           'alt="EU siting map, pumped-storage firming"><figcaption style="font-size:12.5px;'
+           'color:var(--muted);margin-top:6px">If firmed by <b>pumped storage</b> — only where the '
+           'ANU atlas shows reservoir terrain (flat sites omitted); much cheaper where available. '
+           'Same colour scale as the H₂ map.</figcaption></figure>')
         + table +
         (_fig_box(barfig) if barfig else "") +
         '<p class="sub" style="font-size:13px">Each sun + wind figure reflects the exact ERA5 grid '
