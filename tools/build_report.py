@@ -292,11 +292,12 @@ def wind_section():
 
 def siting_section():
     """'Where in Europe to build' — the EU clean-power siting comparison
-    (output/eu_siting_results.json + figs/eu_siting_map.png, eu_siting.png from
+    (output/eu_siting_results.json + figs/eu_siting_map_{h2,phs}.png, eu_siting.png from
     tools/build_eu_siting.py). Empty if not built."""
     sp = os.path.join(ROOT, "output", "eu_siting_results.json")
-    mapfig, barfig = _img("eu_siting_map.png"), _img("eu_siting.png")
-    if not os.path.exists(sp) or not mapfig:
+    map_h2, map_phs, barfig = (_img("eu_siting_map_h2.png"), _img("eu_siting_map_phs.png"),
+                               _img("eu_siting.png"))
+    if not os.path.exists(sp) or not map_h2:
         return ""
     d = json.load(open(sp)); yr = d["ranking_year"]
     j = yr - 2025
@@ -366,7 +367,14 @@ def siting_section():
         '<b>sun/wind AND</b> reservoir terrain coincide: <b>Switzerland/Romania</b> have the terrain '
         'but weaker renewables, so PHS alone doesn\'t make them cheap — their real edge is firm '
         '<i>conventional</i> hydro generation.</p>'
-        + _fig_box(mapfig) + table +
+        + ('<div class="figs"><figure><img src="' + map_h2 + '" alt="EU siting map, '
+           'green-hydrogen firming"><figcaption>If firmed by <b>green hydrogen</b> — works at '
+           'every site (H₂ needs no terrain).</figcaption></figure>'
+           '<figure><img src="' + map_phs + '" alt="EU siting map, pumped-storage firming">'
+           '<figcaption>If firmed by <b>pumped storage</b> — only where the ANU atlas shows '
+           'reservoir terrain (flat sites omitted); much cheaper where available. Same colour '
+           'scale as the H₂ map.</figcaption></figure></div>')
+        + table +
         (_fig_box(barfig) if barfig else "") +
         '<p class="sub" style="font-size:13px">Each sun + wind figure reflects the exact ERA5 grid '
         'cell at the site\'s coordinates, so very localized wind regimes (e.g. the Tarifa jet) can '
