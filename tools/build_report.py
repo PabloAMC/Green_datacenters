@@ -311,12 +311,12 @@ def siting_section():
         return f"solar + wind + battery + {store}"
     rows = sorted(d["sites"], key=lambda r: r["delivered"][j])
 
-    def _re85(r):
-        if not r.get("re85_gas"):
+    def _re75(r):
+        if not r.get("re75_gas"):
             return "—"                                   # firm clean (geothermal/hydro)
-        if r.get("re85_re") and r["re85_re"][j] >= 0.83:
-            return "$%.0f" % r["re85_gas"][j]
-        return "<span style='color:#999'>infeasible*</span>"   # low-wind: hits the solar wall
+        if r.get("re75_re") and r["re75_re"][j] >= 0.73:
+            return "$%.0f" % r["re75_gas"][j]
+        return "<span style='color:#999'>infeasible</span>"   # very low wind: hits the solar wall
 
     def _firm_cell(r, key):   # green-H₂ / PHS column; bold the cheaper of the two
         v = r.get(key)
@@ -331,11 +331,11 @@ def siting_section():
         f"<tr><th>{r['label']}</th><td>{res_label(r)}</td>"
         f"<td class='cx'>${r['delivered'][j]:.0f}</td>"
         f"<td>{_firm_cell(r, 'delivered_h2')}</td><td>{_firm_cell(r, 'delivered_phs')}</td>"
-        f"<td>{_re85(r)}</td></tr>"
+        f"<td>{_re75(r)}</td></tr>"
         for r in rows)
     table = ("<table><thead><tr><th>Location</th><th>Cheapest clean resource</th>"
              f"<th>{yr} $/MWh</th><th>via green-H₂</th><th>via PHS</th>"
-             f"<th>85% RE + gas</th></tr></thead>"
+             f"<th>75% RE + gas</th></tr></thead>"
              f"<tbody>{body}</tbody></table>")
     src = "real ERA5 weather" if d.get("weather") == "real ERA5" else "illustrative resource"
     cheapest = rows[0]
@@ -354,19 +354,24 @@ def siting_section():
         'two ways, and which one it can use is itself geographic. To avoid conflating a good site '
         'with a lucky firming choice, the table shows <b>both</b> the green-H₂ and the pumped-storage '
         '(PHS) cost for every site, with PHS availability taken from the <b>ANU Global Pumped Hydro '
-        'Atlas</b> (off-river PHS needs relief/head). Where PHS is available — the Iberian/'
-        'Mediterranean sierras, the Alps, the Carpathians, and Gran Canaria — it is markedly cheaper '
+        'Atlas</b> (off-river PHS needs relief/head). Where PHS co-locates with good sun+wind — the '
+        'Iberian/Mediterranean sierras and mountainous islands (Tarifa, Sines, Sicily, Crete, Gran '
+        'Canaria) — it is markedly cheaper '
         'than H₂, because its ~80% round-trip (vs H₂\'s ~35%) wastes far less overbuild; the open '
         'circle on each bar marks the firming <i>not</i> chosen, so the gap is visible. Flat sites '
         'with little head — <b>Jutland</b> (Denmark) and the <b>Dover Strait</b> — have no cheap PHS '
         f'and use H₂. ({yr}, firm · {src}.)</p>'
-        '<p style="font-size:13.5px">Two findings worth noting. (1) At <b>low-wind</b> sites (Crete, '
-        'Sicily) an 85%-<i>renewable</i> + gas build is <b>infeasible</b> (solar+battery walls out '
-        'near ~80%), yet PHS firms them to a cheap, fully zero-carbon cost — its high round-trip '
-        'bridges multi-day gaps that gas-backed solar can\'t. (2) PHS only helps where good local '
-        '<b>sun/wind AND</b> reservoir terrain coincide: <b>Switzerland/Romania</b> have the terrain '
-        'but weaker renewables, so PHS alone doesn\'t make them cheap — their real edge is firm '
-        '<i>conventional</i> hydro generation.</p>'
+        '<p style="font-size:13.5px">Two findings worth noting. (1) <b>Wind and pumped-storage terrain '
+        'aren\'t always co-located.</b> Mountainous islands (Crete, Sicily) and the Iberian sierras have '
+        'both, so PHS firms their strong sun+wind cheaply. But <b>Romania</b>\'s wind is on the flat '
+        'Black Sea coast (Dobrogea) while its PHS is inland in the Carpathians — so its coastal site is '
+        'H₂-firmed (the two would need a grid to combine); and <b>Switzerland</b> is genuinely wind-poor, '
+        'so even with world-class PHS its off-grid RE cost is high — its real edge is firm '
+        '<i>conventional</i> hydro generation. (2) <b>In carbon-priced Europe, partial-gas isn\'t the '
+        'cheap option.</b> The "75% RE + gas" reference is cheaper than going fully clean only at the '
+        'flat sites where the clean firming (H₂) is itself expensive (Jutland, Dover); where PHS makes '
+        'clean firming cheap, the <b>100%-zero-carbon build beats 75%-RE-plus-gas</b> — carbon-taxed gas '
+        'is no longer a cheap fallback.</p>'
         + ('<div class="figs"><figure><img src="' + map_h2 + '" alt="EU siting map, '
            'green-hydrogen firming"><figcaption>If firmed by <b>green hydrogen</b> — works at '
            'every site (H₂ needs no terrain).</figcaption></figure>'
