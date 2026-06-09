@@ -57,8 +57,9 @@ ERA5_YEARS = list(range(2018, 2025))   # 7 ERA5 years for the RE candidates
 # these coordinates; firm geothermal/hydro use the resource LCOE (weather-independent).
 CANDIDATES = [
     # ── Sun + wind (gas-free RE + H₂; real ERA5) ─────────────────────────────────
-    ("Lanzarote (Canary Is.)", "canary_lanzarote", "re", 5.8, 8.0, 29.0, -13.6, None,
-     "subtropical sun + steady NE trade winds — the standout sun-and-wind combo"),
+    ("Gran Canaria (Chira-Soria)", "gran_canaria", "re", 5.6, 7.5, 27.96, -15.60, None,
+     "Canary trade winds + strong sun, AND a real pumped-storage scheme (Chira-Soria, "
+     "coast-to-1,950 m relief) — unlike flat Lanzarote"),
     ("Tarifa (Str. of Gibraltar)", "tarifa", "re", 5.2, 8.5, 36.0, -5.6, None,
      "strongest mainland-EU wind (Levante/Poniente) + strong sun"),
     ("Dover Strait (Pas-de-Calais)", "dover_strait", "re", 2.9, 8.2, 50.95, 1.45, None,
@@ -90,12 +91,16 @@ CANDIDATES = [
 
 COL = {"re": "#56B4E9", "geothermal": "#D55E00", "hydro": "#0072B2"}
 
-# Sites with the topography + (ideally existing) reservoirs for cheap PUMPED STORAGE —
-# the six countries flagged as having untapped PHS potential (Spain/Tarifa, Portugal/Sines,
-# Italy/Sicily, Greece/Crete, Switzerland, Romania). For these, the gas-free RE build is
-# firmed by PHS (RTE 0.80, ~50-yr life) instead of green H₂ (RTE 0.35) — much cheaper where
-# available. Flat sites (Jutland, Dover) and the Canaries are firmed by green H₂.
-PHS_SITES = {"tarifa", "portugal_sines", "sicily", "crete", "swiss_alps", "romania_carpathians"}
+# Sites where pumped storage is AVAILABLE, judged from the ANU Global Pumped Hydro Atlas
+# (Blakers et al.) + known real schemes — i.e. sufficient relief/head (off-river PHS needs
+# topography, not flat land). For these we compute BOTH firmings (green-H₂ AND PHS) and show
+# them side by side, so the chart never conflates "good site" with "was allowed PHS". PHS-
+# capable: the Iberian/Mediterranean sierras (Tarifa, Sines, Sicily, Crete), the Alps
+# (Switzerland), the Carpathians (Romania), and Gran Canaria (coast-to-1,950 m; real Chira-
+# Soria scheme). NOT PHS-capable (atlas: little/no head): flat Jutland (Denmark) and the
+# low-relief Dover Strait/Pas-de-Calais — those are firmed by green H₂ only.
+PHS_AVAILABLE = {"gran_canaria", "tarifa", "portugal_sines", "sicily", "crete",
+                 "swiss_alps", "romania_carpathians"}
 
 
 def _era5_path(slug):
@@ -146,12 +151,20 @@ def score_site(cand, grid_steps=15, n_mc=20, seed=42):
         cf_w = float(np.mean([w for _, w in weather_years]))
         solar_t, wind_t = cf_consistent_techs(reg, "eu", cf_s, cf_w)
         wsrc = f"ERA5 {ERA5_YEARS[0]}-{ERA5_YEARS[-1]}"
-    # Firm the gas-free build with PHS where there's pumped-storage potage, else green H₂.
-    ldes_tech = "phs" if slug in PHS_SITES else "h2"
-    firming = "PHS" if ldes_tech == "phs" else "green-H₂"
-    h2 = h2_system_trajectory(solar_t, wind_t, reg["battery"], irr, wind, sysp,
-                              YEARS, seed=seed, n_mc=n_mc, weather_years=weather_years,
-                              ldes_tech=ldes_tech)
+    # FAIRNESS: compute the gas-free build with green H₂ always, and ALSO with PHS where the
+    # atlas says pumped storage is available — then report both side by side and take the
+    # cheaper as the headline. This decouples site quality from the firming choice.
+    def _firm(tech):
+        return [round(float(v), 2) for v in h2_system_trajectory(
+            solar_t, wind_t, reg["battery"], irr, wind, sysp, YEARS, seed=seed,
+            n_mc=n_mc, weather_years=weather_years, ldes_tech=tech)["lcoe"]]
+    deliv_h2 = _firm("h2")
+    deliv_phs = _firm("phs") if slug in PHS_AVAILABLE else None
+    if deliv_phs is not None and deliv_phs[MILESTONE - 2025] < deliv_h2[MILESTONE - 2025]:
+        delivered, firming = deliv_phs, "PHS"
+    else:
+        delivered, firming = deliv_h2, "green-H₂"
+    h2 = {"lcoe": delivered}   # headline = cheaper firming
     # The cheaper, NOT-fully-clean alternative: a firm 85%-renewable solar+wind+battery
     # build with EU gas covering the residual ~15% (the standard main-model optimisation).
     sim = run_simulation(solar=solar_t, wind=wind_t, battery=reg["battery"], gas=reg["gas"],
@@ -166,10 +179,11 @@ def score_site(cand, grid_steps=15, n_mc=20, seed=42):
     re85_re = [round(float(v), 3) for v in sc85["opt_re"]]
     return {"label": label, "slug": slug, "resource": res, "lat": lat, "lon": lon,
             "note": note, "years": [2025 + i for i in range(YEARS + 1)],
-            "delivered": [round(float(v), 2) for v in h2["lcoe"]],
-            "firming": firming,
+            "delivered": delivered,           # headline = cheaper firming
+            "firming": firming,               # which firming won
+            "delivered_h2": deliv_h2,         # green-H₂-firmed (always computed)
+            "delivered_phs": deliv_phs,       # PHS-firmed (None where PHS unavailable)
             "re85_gas": re85, "re85_re": re85_re,
-            "buy_frac": [round(float(v), 3) for v in h2["buy_frac"]],
             "weather": wsrc, "cf_solar": round(cf_s, 3) if cf_s else None,
             "cf_wind": round(cf_w, 3) if cf_w else None}
 
@@ -188,6 +202,16 @@ def build_figure(results, mi):
     ax.invert_yaxis()
     for yi, v in zip(y, vals):
         ax.text(v + 1.5, yi, f"${v:.0f}", va="center", fontsize=8.5)
+    # FAIRNESS: for sites where both firmings were computed, mark the ALTERNATIVE firming
+    # (the one not chosen) as an open circle — so the H₂↔PHS gap is shown side by side and
+    # the ranking can't quietly bury the firming choice inside the site's resource quality.
+    has_alt = False
+    for yi, r in zip(y, rows):
+        if r.get("delivered_h2") is None or r.get("delivered_phs") is None:
+            continue
+        alt = r["delivered_h2"][j] if r["firming"] == "PHS" else r["delivered_phs"][j]
+        has_alt = True
+        ax.plot(alt, yi, marker="o", mfc="none", mec="#1f4e8c", mew=1.5, ms=9, zorder=6)
     # For sun+wind sites, overlay the cheaper 85%-RE + gas build (not zero-carbon) as a
     # diamond — the gap to the bar end is the premium for going fully carbon-free.
     has85 = False
@@ -210,9 +234,13 @@ def build_figure(results, mi):
     ax.axvline(g_us, color="#999999", ls=":", lw=1.5, label=f"US gas {mi} (${g_us:.0f})")
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
-    handles = [Patch(color=COL["re"], label="Solar+wind+battery+green-H₂ (gas-free)"),
+    handles = [Patch(color=COL["re"], label="Sun+wind+battery, gas-free (bar = cheaper firming)"),
                Patch(color=COL["geothermal"], label="Geothermal (firm)"),
                Patch(color=COL["hydro"], label="Hydro (firm)")]
+    if has_alt:
+        handles.append(Line2D([0], [0], marker="o", mfc="none", mec="#1f4e8c", mew=1.5,
+                              ls="none", markersize=9,
+                              label="Alternative firming (the other of H₂ / PHS)"))
     if has85:
         handles.append(Line2D([0], [0], marker="D", color="w", markerfacecolor="#333",
                               markeredgecolor="white", markersize=8,

@@ -915,9 +915,14 @@ sites, not typical markets. Each sun+wind figure reflects the exact ERA5 grid ce
 lat/lon, so very localized wind regimes (e.g. the Tarifa jet) can be under-captured — the ranking is
 directional; re-fetch a precise point to site-tune.
 
-**Pumped-storage firming (v5.7).** The six countries with pumped-hydro topography (Spain, Portugal,
-Italy, Greece, Switzerland, Romania) firm their solar+wind with **PHS** (§7.5) instead of green H₂
-(hexagon markers on the map). The effect is large: the Mediterranean PHS sites fall to **Tarifa
+**Pumped-storage firming, shown fairly (v5.7).** A sun+wind site can be firmed by green H₂ *or* by
+**PHS** (§7.5), and which it can use is itself geographic (off-river PHS needs head). To avoid
+conflating site quality with a firming choice, the builder computes **both** firmings for every
+site and reports them side by side — two table columns, plus an open-circle marker on each bar for
+the firming *not* chosen — with **PHS availability taken from the ANU Global Pumped Hydro Atlas**
+(PHS-capable: the Iberian/Mediterranean sierras, the Alps, the Carpathians, and Gran Canaria with
+its real Chira-Soria scheme; *not* flat Jutland or the low-relief Dover Strait, which use H₂). The
+effect is large where PHS is available: the Mediterranean PHS sites fall to **Tarifa
 \$82, Heraklion/Crete \$86, Sines \$89, Gela/Sicily \$91** (2030, real ERA5) — well below the
 H₂-firmed sites (Lanzarote \$104, Jutland \$114, Dover \$116) and approaching the firm
 hydro (\$46) / geothermal (\$63) leaders. Most striking: **Crete and Sicily are *infeasible* at
