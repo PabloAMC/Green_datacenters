@@ -263,9 +263,9 @@ def build_figure(results, mi):
         handles.append(Line2D([0], [0], marker="D", color="w", markerfacecolor="#333",
                               markeredgecolor="white", markersize=8,
                               label="Same site at 75% RE + gas (25% gas; not zero-carbon)"))
-    # "Build option" legend at UPPER-LEFT — over the uniform $46 firm-hydro bars (the least
-    # information-dense corner), so it covers none of the sun+wind firming markers/diamonds.
-    ax.legend(handles=handles, loc="upper left", fontsize=8, frameon=True,
+    # "Build option" legend in the UPPER-RIGHT whitespace — above the short, cheap firm-clean
+    # bars (hydro $46 / geothermal $63), which have no right-side markers, so it covers nothing.
+    ax.legend(handles=handles, loc="upper right", fontsize=8, frameon=True,
               facecolor="white", framealpha=1, title="Build option")
     real = any(r.get("weather", "").startswith("ERA5") for r in results)
     src = "real ERA5 weather" if real else "illustrative resource"
