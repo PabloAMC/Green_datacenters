@@ -316,12 +316,25 @@ def siting_section():
         if r.get("re85_re") and r["re85_re"][j] >= 0.83:
             return "$%.0f" % r["re85_gas"][j]
         return "<span style='color:#999'>infeasible*</span>"   # low-wind: hits the solar wall
+
+    def _firm_cell(r, key):   # green-H₂ / PHS column; bold the cheaper of the two
+        v = r.get(key)
+        if v is None:
+            return "—"
+        s = "$%.0f" % v[j]
+        other = r.get("delivered_phs" if key == "delivered_h2" else "delivered_h2")
+        if other is not None and v[j] <= other[j]:
+            s = f"<b>{s}</b>"
+        return s
     body = "".join(
         f"<tr><th>{r['label']}</th><td>{res_label(r)}</td>"
-        f"<td class='cx'>${r['delivered'][j]:.0f}</td><td>{_re85(r)}</td></tr>"
+        f"<td class='cx'>${r['delivered'][j]:.0f}</td>"
+        f"<td>{_firm_cell(r, 'delivered_h2')}</td><td>{_firm_cell(r, 'delivered_phs')}</td>"
+        f"<td>{_re85(r)}</td></tr>"
         for r in rows)
     table = ("<table><thead><tr><th>Location</th><th>Cheapest clean resource</th>"
-             f"<th>{yr} $/MWh (zero-carbon)</th><th>85% RE + gas</th></tr></thead>"
+             f"<th>{yr} $/MWh</th><th>via green-H₂</th><th>via PHS</th>"
+             f"<th>85% RE + gas</th></tr></thead>"
              f"<tbody>{body}</tbody></table>")
     src = "real ERA5 weather" if d.get("weather") == "real ERA5" else "illustrative resource"
     cheapest = rows[0]
@@ -329,29 +342,39 @@ def siting_section():
         '<h2>Where in Europe should you build?</h2>'
         '<p>The same model can rank <b>candidate locations</b> by the cheapest <b>24/7 '
         'carbon-free</b> delivered power, letting each site use its <b>best clean resource</b>: '
-        'sunny/windy sites build the gas-free solar + wind + battery + green-hydrogen system; '
         'sites with firm zero-carbon resources — <b>geothermal</b> (Iceland) or abundant '
-        '<b>hydro</b> (Norway, Sweden, the Alps) — simply run on that.</p>'
+        '<b>hydro</b> (Norway, Sweden, the Alps, Greenland) — simply run on that; sun/wind sites '
+        'build a gas-free solar + wind + battery system, firmed by either <b>green hydrogen</b> '
+        'or <b>pumped storage</b>.</p>'
         f'<p><b>Firm clean baseload wins decisively.</b> Nordic/Alpine <b>hydro (~${cheapest["delivered"][j]:.0f}/MWh)</b> '
         'and Icelandic <b>geothermal (~$63)</b> beat every build-it-yourself sun-and-wind site '
-        'and sit far below gas. Among sun + wind sites the <b>Canary Islands</b> lead (steady '
-        'trade winds + strong sun), then windy <b>Jutland</b>. For those sun + wind sites the '
-        'chart and table also show a cheaper <b>85% renewable + gas</b> build (the diamond on '
-        'each bar / the last column) — not zero-carbon, but the gap to the full-clean bar is the '
-        f'premium for eliminating that last ~15% of emissions. ({yr}, firm · {src}.)</p>'
-        '<p style="font-size:13.5px">*A notable finding: at <b>low-wind</b> sites (Crete, Sicily) '
-        'an 85%-<i>renewable</i> firm build is <b>infeasible</b> — without wind, solar + battery '
-        'hits a wall around ~80% and can\'t bridge multi-day gaps — so there the fully zero-carbon '
-        'green-H₂ build (which optimises freely and buys H₂ for the rare deficits) is actually the '
-        '<b>cheaper</b> clean option. Wind is what makes cheap high-renewable possible.</p>'
+        'and sit far below gas.</p>'
+        '<p><b>Firming fairly — pumped storage vs green hydrogen.</b> A sun+wind site can be firmed '
+        'two ways, and which one it can use is itself geographic. To avoid conflating a good site '
+        'with a lucky firming choice, the table shows <b>both</b> the green-H₂ and the pumped-storage '
+        '(PHS) cost for every site, with PHS availability taken from the <b>ANU Global Pumped Hydro '
+        'Atlas</b> (off-river PHS needs relief/head). Where PHS is available — the Iberian/'
+        'Mediterranean sierras, the Alps, the Carpathians, and Gran Canaria — it is markedly cheaper '
+        'than H₂, because its ~80% round-trip (vs H₂\'s ~35%) wastes far less overbuild; the open '
+        'circle on each bar marks the firming <i>not</i> chosen, so the gap is visible. Flat sites '
+        'with little head — <b>Jutland</b> (Denmark) and the <b>Dover Strait</b> — have no cheap PHS '
+        f'and use H₂. ({yr}, firm · {src}.)</p>'
+        '<p style="font-size:13.5px">Two findings worth noting. (1) At <b>low-wind</b> sites (Crete, '
+        'Sicily) an 85%-<i>renewable</i> + gas build is <b>infeasible</b> (solar+battery walls out '
+        'near ~80%), yet PHS firms them to a cheap, fully zero-carbon cost — its high round-trip '
+        'bridges multi-day gaps that gas-backed solar can\'t. (2) PHS only helps where good local '
+        '<b>sun/wind AND</b> reservoir terrain coincide: <b>Switzerland/Romania</b> have the terrain '
+        'but weaker renewables, so PHS alone doesn\'t make them cheap — their real edge is firm '
+        '<i>conventional</i> hydro generation.</p>'
         + _fig_box(mapfig) + table +
         (_fig_box(barfig) if barfig else "") +
         '<p class="sub" style="font-size:13px">Each sun + wind figure reflects the exact ERA5 grid '
         'cell at the site\'s coordinates, so very localized wind regimes (e.g. the Tarifa jet) can '
         'be under-captured — treat the ranking as directional. Geothermal/hydro costs are sourced '
-        'to IRENA 2023 installed costs ($4,589/kW geothermal, $2,806/kW hydro) computed at the '
-        'model\'s own WACC — just below IRENA\'s published LCOEs ($71 / $57); hydro uses CF 0.55 '
-        '(reservoirs are energy-limited). From <code>tools/build_eu_siting.py</code>.</p>')
+        'to IRENA 2023 installed costs ($4,589/kW geothermal, $2,806/kW hydro); pumped storage to '
+        'NREL ATB / DOE-PNNL (RTE 0.80, ~50-yr life, $60/kWh reservoir + ~$1,200/kW reversible). '
+        '(Lazard\'s storage analysis is lithium-ion-centric and does not cover PHS.) '
+        'From <code>tools/build_eu_siting.py</code>.</p>')
 
 
 def assumptions_table(us, eu):
