@@ -258,16 +258,35 @@ def build_figure(results, mi):
     return fig
 
 
-def build_map(results, mi):
-    """Map of EU candidate sites, coloured by delivered 24/7 carbon-free $/MWh at year `mi`
-    (green = cheap), marker shape by clean resource. Uses cartopy for coastlines/borders if
-    available; otherwise falls back to a latitude-corrected lon/lat scatter (no basemap)."""
+# Per-site label nudges (offset points dx,dy + horizontal alignment) to avoid collisions —
+# e.g. Switzerland (Linth-Limmern) sits just west of Austria (Kaprun), so label it to the LEFT.
+LABEL_OFFSET = {"swiss_alps": (-7, 4, "right")}
+
+
+def _site_cost(r, j, firming):
+    """Delivered $/MWh of site `r` at year-index `j` under a single firming choice.
+    Firm baseload (geothermal/hydro) is firming-independent → shown on both maps. A sun+wind
+    site returns None where that firming isn't available (e.g. PHS at a flat site)."""
+    if r["resource"] in ("geothermal", "hydro"):
+        return r["delivered"][j]
+    v = r.get("delivered_h2" if firming == "h2" else "delivered_phs")
+    return v[j] if v is not None else None
+
+
+def build_map(results, mi, firming, norm=None):
+    """Map of EU candidate sites coloured by delivered 24/7 carbon-free $/MWh at `mi` under ONE
+    firming choice (`firming` = 'h2' or 'phs'), so the map never silently picks a firming per
+    site. Sun+wind sites are firmed by that option (PHS-only sites omitted on the H₂ map? no —
+    H₂ works everywhere; on the PHS map, sites without pumped-storage potential are omitted);
+    firm geothermal/hydro appear on both as context. cartopy basemap with a scatter fallback."""
     j = mi - 2025
-    vals = [r["delivered"][j] for r in results]
-    vmin, vmax = min(vals), min(max(vals), 175)
     cmap = plt.get_cmap("RdYlGn_r")
-    norm = plt.Normalize(vmin, vmax)
+    if norm is None:
+        vv = [c for r in results if (c := _site_cost(r, j, firming)) is not None]
+        norm = plt.Normalize(min(vv), min(max(vv), 175))
     extent = [-54, 30, 28, 70]   # SW Greenland → E. Mediterranean (incl. Nuuk at −50.7°)
+    is_phs = firming == "phs"
+    firm_name = "pumped storage" if is_phs else "green hydrogen"
 
     try:
         import cartopy.crs as ccrs
@@ -281,7 +300,6 @@ def build_map(results, mi):
         ax.add_feature(cfeature.COASTLINE, lw=0.5, edgecolor="#888")
         ax.add_feature(cfeature.BORDERS, lw=0.4, edgecolor="#BBB")
         tkw = dict(transform=proj)
-        have_map = True
     except Exception as e:   # noqa: BLE001  (cartopy/NE data absent → plain scatter)
         print(f"  [map] cartopy unavailable ({type(e).__name__}); plain lon/lat scatter.")
         fig, ax = plt.subplots(figsize=(13, 7.5))
@@ -290,47 +308,40 @@ def build_map(results, mi):
         ax.set_aspect(1.0 / _m.cos(_m.radians(48)))   # latitude aspect correction
         ax.set_facecolor("#EAF2F8")
         tkw = {}
-        have_map = False
 
-    def _mk(r):   # marker: RE split by firming (green-H₂ circle vs PHS hexagon)
-        if r["resource"] == "geothermal":
-            return "^"
-        if r["resource"] == "hydro":
-            return "s"
-        return "h" if r.get("firming") == "PHS" else "o"
-    for mk in ("o", "h", "^", "s"):
-        pts = [r for r in results if _mk(r) == mk]
+    mk_for = {"geothermal": "^", "hydro": "s", "re": "o"}
+    plotted = [(r, c) for r in results if (c := _site_cost(r, j, firming)) is not None]
+    for mk in ("o", "^", "s"):
+        pts = [(r, c) for (r, c) in plotted if mk_for[r["resource"]] == mk]
         if not pts:
             continue
-        ax.scatter([r["lon"] for r in pts], [r["lat"] for r in pts],
-                   c=[r["delivered"][j] for r in pts], cmap=cmap, norm=norm,
-                   marker=mk, s=210 if mk == "h" else 190, edgecolor="black", lw=0.7,
-                   zorder=5, **tkw)
-    for r in results:                      # labels: site + $value
-        ax.annotate(f"{r['label'].split(' (')[0]}\n${r['delivered'][j]:.0f}",
-                    (r["lon"], r["lat"]), xytext=(6, 4), textcoords="offset points",
-                    fontsize=7.5, fontweight="bold", zorder=6)
+        ax.scatter([r["lon"] for r, _ in pts], [r["lat"] for r, _ in pts],
+                   c=[c for _, c in pts], cmap=cmap, norm=norm, marker=mk, s=190,
+                   edgecolor="black", lw=0.7, zorder=5, **tkw)
+    for r, c in plotted:                   # labels: site + $value
+        dx, dy, ha = LABEL_OFFSET.get(r["slug"], (6, 4, "left"))
+        ax.annotate(f"{r['label'].split(' (')[0]}\n${c:.0f}",
+                    (r["lon"], r["lat"]), xytext=(dx, dy), textcoords="offset points",
+                    fontsize=7.5, fontweight="bold", ha=ha, zorder=6)
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm); sm.set_array([])
     cb = fig.colorbar(sm, ax=ax, shrink=0.6, pad=0.02)
     cb.set_label(f"Delivered 24/7 carbon-free cost in {mi} ($/MWh)")
     from matplotlib.lines import Line2D
     handles = [Line2D([0], [0], marker="o", color="w", markerfacecolor="#999",
-                      markeredgecolor="k", markersize=11, label="Sun+wind+battery + green-H₂"),
-               Line2D([0], [0], marker="h", color="w", markerfacecolor="#999",
-                      markeredgecolor="k", markersize=12, label="Sun+wind+battery + pumped storage"),
+                      markeredgecolor="k", markersize=11,
+                      label=f"Sun+wind+battery, firmed by {firm_name}"),
                Line2D([0], [0], marker="^", color="w", markerfacecolor="#999",
                       markeredgecolor="k", markersize=12, label="Geothermal (firm)"),
                Line2D([0], [0], marker="s", color="w", markerfacecolor="#999",
                       markeredgecolor="k", markersize=11, label="Hydro (firm)")]
-    # Legend BELOW the map (a box in the upper-right would occlude the Nordic markers,
-    # e.g. Sweden at ~64.5°N/18°E).
     ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.04), ncol=3,
               fontsize=8.5, frameon=True, facecolor="white", framealpha=1,
               title="Clean resource", title_fontsize=9)
     real = any(r.get("weather", "").startswith("ERA5") for r in results)
-    ax.set_title(f"Where to site a zero-carbon EU datacenter — delivered firm clean power, {mi}\n"
-                 f"({'real ERA5 weather' if real else 'illustrative resource'}; "
-                 f"green = cheaper)", fontsize=12)
+    omit = "  ·  flat sites without PHS potential omitted" if is_phs else ""
+    ax.set_title(f"EU datacenter — delivered firm clean power if firmed by {firm_name.upper()}, {mi}\n"
+                 f"({'real ERA5 weather' if real else 'illustrative resource'}; green = cheaper"
+                 f"{omit})", fontsize=12)
     fig.tight_layout()
     return fig
 
@@ -362,9 +373,16 @@ def main(argv=None):
     fig = build_figure(results, args.year)
     figpath = os.path.join(ROOT, "figs", "eu_siting.png")
     fig.savefig(figpath, dpi=200, bbox_inches="tight"); plt.close(fig)
-    mapfig = build_map(results, args.year)
-    mappath = os.path.join(ROOT, "figs", "eu_siting_map.png")
-    mapfig.savefig(mappath, dpi=200, bbox_inches="tight"); plt.close(mapfig)
+    # Two maps — one per firming choice — so the map never silently picks H₂ vs PHS per site.
+    # Shared colour scale across both for a like-for-like read.
+    j = args.year - 2025
+    allc = [c for r in results for fm in ("h2", "phs")
+            if (c := _site_cost(r, j, fm)) is not None]
+    shared = plt.Normalize(min(allc), min(max(allc), 175))
+    for fm in ("h2", "phs"):
+        mf = build_map(results, args.year, fm, norm=shared)
+        mf.savefig(os.path.join(ROOT, "figs", f"eu_siting_map_{fm}.png"),
+                   dpi=200, bbox_inches="tight"); plt.close(mf)
 
     real = any(r.get("weather", "").startswith("ERA5") for r in results)
     payload = {"model_version": MODEL_VERSION, "git_commit": git_commit(),
@@ -376,7 +394,8 @@ def main(argv=None):
                "sites": results}
     with open(os.path.join(ROOT, "output", "eu_siting_results.json"), "w") as fh:
         json.dump(payload, fh, indent=2)
-    print(f"\nWrote {figpath}, {mappath}, and output/eu_siting_results.json")
+    print(f"\nWrote {figpath}, figs/eu_siting_map_h2.png, figs/eu_siting_map_phs.png, "
+          "and output/eu_siting_results.json")
 
 
 if __name__ == "__main__":

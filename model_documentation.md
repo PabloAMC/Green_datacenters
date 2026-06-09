@@ -900,8 +900,9 @@ candidate sites on **one metric — delivered firm zero-carbon \$/MWh** — lett
 clean resource: sun+wind sites build the gas-free solar+wind+LFP+green-H₂ system (§7.6) on **real
 ERA5** weather (re-anchoring the imported LCOE to the site CF, as in `build_locations`); geothermal
 and hydro sites run on the firm-clean baseload above. It emits a ranked bar chart
-(`figs/eu_siting.png`) and a **map** (`figs/eu_siting_map.png`; cartopy coastlines/borders, with a
-plain lon/lat-scatter fallback when cartopy is absent) plus `output/eu_siting_results.json`.
+(`figs/eu_siting.png`) and **two maps** — one per firming choice (`figs/eu_siting_map_h2.png` and
+`figs/eu_siting_map_phs.png`; cartopy coastlines/borders, plain lon/lat-scatter fallback) so the map
+never silently picks H₂ vs PHS per site — plus `output/eu_siting_results.json`.
 
 **Result (2030, delivered \$/MWh, real ERA5 2018–2024):** firm clean baseload wins decisively —
 Nordic/Alpine **hydro ≈ \$46** (Norway, Sweden, the Alps) and Iceland **geothermal ≈ \$63** beat
