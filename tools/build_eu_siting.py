@@ -64,17 +64,20 @@ CANDIDATES = [
      "strongest mainland-EU wind (Levante/Poniente) + strong sun"),
     ("Dover Strait (Pas-de-Calais)", "dover_strait", "re", 2.9, 8.2, 50.95, 1.45, None,
      "English Channel: strong, steady wind to complement S-England/N-France solar"),
-    ("Heraklion (Crete)", "crete", "re", 5.2, 6.8, 35.3, 25.1, None,
-     "high sun + Aegean meltemi wind"),
-    ("Gela (Sicily)", "sicily", "re", 5.0, 5.5, 37.3, 14.1, None, "high Mediterranean sun"),
+    ("East Crete (meltemi)", "crete", "re", 5.3, 8.0, 35.2, 26.2, None,
+     "strong Aegean meltemi wind + high sun; mountainous island → co-located PHS relief"),
+    ("SW Sicily (Mazara)", "sicily", "re", 5.0, 7.0, 37.65, 12.6, None,
+     "Sicily-Channel wind + high sun; island relief for PHS"),
     ("Sines (S. Portugal)", "portugal_sines", "re", 5.0, 6.8, 37.9, -8.8, None,
      "Atlantic sun + coastal wind"),
     ("Thisted (NW Jutland)", "jutland", "re", 2.8, 9.0, 56.5, 8.2, None,
      "North Sea wind, weak sun — wind-dominated"),
-    ("Linth-Limmern (Swiss Alps)", "swiss_alps", "re", 3.0, 3.0, 46.85, 9.0, None,
-     "moderate solar, weak Alpine wind — but firmed by abundant Swiss pumped storage"),
-    ("Carpathians (Romania)", "romania_carpathians", "re", 3.7, 5.5, 45.5, 24.5, None,
-     "decent sun + wind, firmed by Carpathian pumped storage (e.g. Tarnița)"),
+    ("Jura (Switzerland)", "swiss_jura", "re", 3.2, 5.0, 47.1, 7.0, None,
+     "best (modest) Swiss wind + solar; Swiss pumped storage. Switzerland is wind-poor — its "
+     "real edge is conventional hydro generation"),
+    ("Dobrogea (Romania)", "romania_dobrogea", "re", 3.7, 8.5, 44.6, 28.4, None,
+     "Romania's Black Sea wind hub (Fântânele-Cogealac); flat coast → firmed by H₂ "
+     "(its pumped storage is separate, inland in the Carpathians)"),
     # ── Firm zero-carbon baseload (concrete plants/sites) ────────────────────────
     ("Hellisheiði (Iceland)", "iceland", "geothermal", 2.2, 8.0, 64.04, -21.40, 0.88,
      "Hellisheiði geothermal station — firm high-enthalpy, runs 24/7, no overbuild"),
@@ -100,7 +103,7 @@ COL = {"re": "#56B4E9", "geothermal": "#D55E00", "hydro": "#0072B2"}
 # Soria scheme). NOT PHS-capable (atlas: little/no head): flat Jutland (Denmark) and the
 # low-relief Dover Strait/Pas-de-Calais — those are firmed by green H₂ only.
 PHS_AVAILABLE = {"gran_canaria", "tarifa", "portugal_sines", "sicily", "crete",
-                 "swiss_alps", "romania_carpathians"}
+                 "swiss_jura"}   # Romania's wind hub (Dobrogea) is flat coast → H₂, not PHS
 
 
 def _era5_path(slug):
@@ -137,7 +140,7 @@ def score_site(cand, grid_steps=15, n_mc=20, seed=42):
                 for i in range(YEARS + 1)]
         return {"label": label, "slug": slug, "resource": res, "lat": lat, "lon": lon,
                 "note": note, "years": [2025 + i for i in range(YEARS + 1)],
-                "delivered": lcoe, "firming": "firm baseload", "re85_gas": None,
+                "delivered": lcoe, "firming": "firm baseload", "re75_gas": None,
                 "cf_base": cf_base, "weather": "n/a (firm baseload)",
                 "cf_solar": None, "cf_wind": None}
 
@@ -165,25 +168,25 @@ def score_site(cand, grid_steps=15, n_mc=20, seed=42):
     else:
         delivered, firming = deliv_h2, "green-H₂"
     h2 = {"lcoe": delivered}   # headline = cheaper firming
-    # The cheaper, NOT-fully-clean alternative: a firm 85%-renewable solar+wind+battery
-    # build with EU gas covering the residual ~15% (the standard main-model optimisation).
+    # The cheaper, NOT-fully-clean alternative: a firm 75%-renewable solar+wind+battery
+    # build with EU gas covering the residual ~25%. 75% (not 85%) sits BELOW the ~80%
+    # solar+battery wall, so it is feasible at every site — including the low-wind ones —
+    # giving a clean, universally-comparable "mostly-renewable + gas" reference.
     sim = run_simulation(solar=solar_t, wind=wind_t, battery=reg["battery"], gas=reg["gas"],
                          smr=reg["smr"], sys=sysp, workload=FIRM, mean_irr=irr,
-                         mean_wind_ms=wind, years=YEARS, reliabilities=[0.85], seed=seed,
+                         mean_wind_ms=wind, years=YEARS, reliabilities=[0.75], seed=seed,
                          weather_years=weather_years)
-    sc85 = sim["scenarios"][0.85]
-    re85 = [round(float(v), 2) for v in sc85["opt_delivered"]]
-    # Achieved renewable fraction — at low-wind sites an 85%-VARIABLE-RE firm build hits the
-    # solar+battery wall (infeasible), and the returned cost is a penalty optimum, not a real
-    # 85% build. Flag those so the figure/table don't show a misleading number.
-    re85_re = [round(float(v), 3) for v in sc85["opt_re"]]
+    sc75 = sim["scenarios"][0.75]
+    re75 = [round(float(v), 2) for v in sc75["opt_delivered"]]
+    # Achieved renewable fraction (to flag the rare site where even 75% can't be met).
+    re75_re = [round(float(v), 3) for v in sc75["opt_re"]]
     return {"label": label, "slug": slug, "resource": res, "lat": lat, "lon": lon,
             "note": note, "years": [2025 + i for i in range(YEARS + 1)],
             "delivered": delivered,           # headline = cheaper firming
             "firming": firming,               # which firming won
             "delivered_h2": deliv_h2,         # green-H₂-firmed (always computed)
             "delivered_phs": deliv_phs,       # PHS-firmed (None where PHS unavailable)
-            "re85_gas": re85, "re85_re": re85_re,
+            "re75_gas": re75, "re75_re": re75_re,
             "weather": wsrc, "cf_solar": round(cf_s, 3) if cf_s else None,
             "cf_wind": round(cf_w, 3) if cf_w else None}
 
@@ -202,6 +205,9 @@ def build_figure(results, mi):
     ax.invert_yaxis()
     for yi, v in zip(y, vals):
         ax.text(v + 1.5, yi, f"${v:.0f}", va="center", fontsize=8.5)
+    # x-axis cap: a wind-poor outlier (Switzerland's 75%-RE+gas needs a huge battery) would
+    # otherwise stretch the axis and squash everyone; cap it and tag off-scale markers "▸$X".
+    CAP = 165.0
     # FAIRNESS: for sites where both firmings were computed, mark the ALTERNATIVE firming
     # (the one not chosen) as an open circle — so the H₂↔PHS gap is shown side by side and
     # the ranking can't quietly bury the firming choice inside the site's resource quality.
@@ -211,27 +217,39 @@ def build_figure(results, mi):
             continue
         alt = r["delivered_h2"][j] if r["firming"] == "PHS" else r["delivered_phs"][j]
         has_alt = True
-        ax.plot(alt, yi, marker="o", mfc="none", mec="#1f4e8c", mew=1.5, ms=9, zorder=6)
-    # For sun+wind sites, overlay the cheaper 85%-RE + gas build (not zero-carbon) as a
+        if alt <= CAP:
+            ax.plot(alt, yi, marker="o", mfc="none", mec="#1f4e8c", mew=1.5, ms=9, zorder=6)
+        else:
+            ax.annotate(f"○ ▸${alt:.0f}", (CAP, yi + 0.28), xytext=(-2, 0),
+                        textcoords="offset points", va="center", ha="right",
+                        fontsize=6.5, color="#1f4e8c")
+    # For sun+wind sites, overlay the cheaper 75%-RE + gas build (not zero-carbon) as a
     # diamond — the gap to the bar end is the premium for going fully carbon-free.
-    has85 = False
+    has75 = False
     for yi, r in zip(y, rows):
-        v85 = r.get("re85_gas")
-        feasible = r.get("re85_re") and r["re85_re"][j] >= 0.83   # 85% target actually met
-        if v85 is not None and feasible:
-            has85 = True
-            ax.plot(v85[j], yi, marker="D", color="#333", ms=7, zorder=6,
-                    markeredgecolor="white", markeredgewidth=0.7)
-            ax.text(v85[j], yi - 0.34, f"${v85[j]:.0f}", va="bottom", ha="center",
-                    fontsize=7, color="#333")
-        elif r["resource"] == "re":   # 85% variable-RE infeasible here (too little wind)
-            ax.text(r["delivered"][j] + 9, yi, "85% RE infeasible (low wind)",
+        v75 = r.get("re75_gas")
+        feasible = r.get("re75_re") and r["re75_re"][j] >= 0.73   # 75% target actually met
+        if v75 is not None and feasible:
+            has75 = True
+            if v75[j] <= CAP:
+                ax.plot(v75[j], yi, marker="D", color="#333", ms=7, zorder=6,
+                        markeredgecolor="white", markeredgewidth=0.7)
+                ax.text(v75[j], yi - 0.34, f"${v75[j]:.0f}", va="bottom", ha="center",
+                        fontsize=7, color="#333")
+            else:
+                ax.annotate(f"◆ ▸${v75[j]:.0f}", (CAP, yi - 0.28), xytext=(-2, 0),
+                            textcoords="offset points", va="center", ha="right",
+                            fontsize=6.5, color="#333")
+        elif r["resource"] == "re":   # even 75% RE infeasible here (very little wind)
+            ax.text(r["delivered"][j] + 9, yi, "75% RE infeasible (low wind)",
                     va="center", fontsize=6.5, color="#999", style="italic")
-    # gas reference lines (the dirty alternative)
+    # gas reference lines (the dirty alternative), labelled inline at the top — no 2nd legend.
     eu_gas = REGIONS["eu"]["gas"]; us_gas = REGIONS["us"]["gas"]
     g_eu = gas_pure_lcoe(eu_gas, j, eu_gas.wacc); g_us = gas_pure_lcoe(us_gas, j, us_gas.wacc)
-    ax.axvline(g_eu, color="#6B705C", ls="--", lw=1.5, label=f"EU gas {mi} (${g_eu:.0f})")
-    ax.axvline(g_us, color="#999999", ls=":", lw=1.5, label=f"US gas {mi} (${g_us:.0f})")
+    for gx, gc, gl in [(g_eu, "#6B705C", "EU"), (g_us, "#999999", "US")]:
+        ax.axvline(gx, color=gc, ls="--", lw=1.5)
+        ax.text(gx, -0.75, f"{gl} gas {mi}\n${gx:.0f}", ha="center", va="bottom",
+                fontsize=7, color=gc, fontweight="bold")
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     handles = [Patch(color=COL["re"], label="Sun+wind+battery, gas-free (bar = cheaper firming)"),
@@ -241,17 +259,17 @@ def build_figure(results, mi):
         handles.append(Line2D([0], [0], marker="o", mfc="none", mec="#1f4e8c", mew=1.5,
                               ls="none", markersize=9,
                               label="Alternative firming (the other of H₂ / PHS)"))
-    if has85:
+    if has75:
         handles.append(Line2D([0], [0], marker="D", color="w", markerfacecolor="#333",
                               markeredgecolor="white", markersize=8,
-                              label="Same site at 85% RE + gas (15% gas; not zero-carbon)"))
-    leg1 = ax.legend(handles=handles, loc="lower right", fontsize=8, frameon=True,
-                     facecolor="white", framealpha=1, title="Build option")
-    ax.add_artist(leg1)
-    ax.legend(loc="upper right", fontsize=8, frameon=True, facecolor="white", framealpha=1)
+                              label="Same site at 75% RE + gas (25% gas; not zero-carbon)"))
+    # "Build option" legend at UPPER-LEFT — over the uniform $46 firm-hydro bars (the least
+    # information-dense corner), so it covers none of the sun+wind firming markers/diamonds.
+    ax.legend(handles=handles, loc="upper left", fontsize=8, frameon=True,
+              facecolor="white", framealpha=1, title="Build option")
     real = any(r.get("weather", "").startswith("ERA5") for r in results)
     src = "real ERA5 weather" if real else "illustrative resource"
-    ax.set(xlabel=f"Delivered 24/7 carbon-free cost in {mi} ($/MWh of load)", xlim=(0, None),
+    ax.set(xlabel=f"Delivered 24/7 carbon-free cost in {mi} ($/MWh of load)", xlim=(0, CAP),
            title=f"Best zero-carbon power for an EU datacenter, by location ({mi}, firm · {src})")
     ax.grid(axis="x", alpha=0.3)
     fig.tight_layout()
@@ -364,7 +382,7 @@ def main(argv=None):
         r = score_site(cand, grid_steps=args.grid_steps, n_mc=args.mc)
         results.append(r)
         j = args.year - 2025
-        extra = (f"  | 85% RE+gas ${r['re85_gas'][j]:5.0f}" if r.get("re85_gas") else "")
+        extra = (f"  | 75% RE+gas ${r['re75_gas'][j]:5.0f}" if r.get("re75_gas") else "")
         fmg = f" [{r.get('firming')}]" if r.get("firming") else ""
         print(f"  {r['label']:<28} {r['resource']:<10} {args.year}: ${r['delivered'][j]:5.0f}/MWh"
               f"{fmg}{extra}  ({r['weather']})")

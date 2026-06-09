@@ -906,34 +906,38 @@ never silently picks H₂ vs PHS per site — plus `output/eu_siting_results.jso
 
 **Result (2030, delivered \$/MWh, real ERA5 2018–2024):** firm clean baseload wins decisively —
 Nordic/Alpine **hydro ≈ \$46** (Norway, Sweden, the Alps) and Iceland **geothermal ≈ \$63** beat
-every build-it-yourself sun+wind site and sit far below gas (EU ~\$125). Among sun+wind sites the
-**Canary Islands (Lanzarote, ≈\$104)** lead on steady trade winds (wind CF ≈0.42) + strong sun,
-then windy **Jutland (≈\$114)**; the calmer Mediterranean sun sites (Sicily/Crete ≈\$140) trail.
-For the sun+wind sites the chart/table also report the cheaper **85% RE + gas** build (firm solar+
-wind+battery with EU gas on the residual ~15%) — not zero-carbon, but the gap to the full-clean
-cost is the premium for the last ~15% of emissions. Candidates are chosen as *promising* clean-power
-sites, not typical markets. Each sun+wind figure reflects the exact ERA5 grid cell at the chosen
-lat/lon, so very localized wind regimes (e.g. the Tarifa jet) can be under-captured — the ranking is
-directional; re-fetch a precise point to site-tune.
+every build-it-yourself sun+wind site and sit far below gas (EU ~\$125). The sun+wind sites rank by
+their **best available firming** (both firmings are shown — see the fairness note): **Gran Canaria
+≈\$69, East Crete ≈\$75, Tarifa ≈\$82, SW Sicily ≈\$84, Sines ≈\$89** (pumped-storage-firmed), then
+the flat H₂-only sites **Jutland ≈\$114** and **Dover ≈\$116**, and the harder cases **Switzerland
+≈\$130** and **Romania ≈\$144** (below). The chart/table also report a **75% RE + gas** build (firm
+solar+wind+battery, EU gas on the residual ~25%) — at 75% (not 85%) so it clears the ~80% solar+
+battery wall and is feasible at every site with real wind. Candidates are chosen as *promising*
+clean-power sites, not typical markets.
 
 **Pumped-storage firming, shown fairly (v5.7).** A sun+wind site can be firmed by green H₂ *or* by
 **PHS** (§7.5), and which it can use is itself geographic (off-river PHS needs head). To avoid
 conflating site quality with a firming choice, the builder computes **both** firmings for every
-site and reports them side by side — two table columns, plus an open-circle marker on each bar for
-the firming *not* chosen — with **PHS availability taken from the ANU Global Pumped Hydro Atlas**
-(PHS-capable: the Iberian/Mediterranean sierras, the Alps, the Carpathians, and Gran Canaria with
-its real Chira-Soria scheme; *not* flat Jutland or the low-relief Dover Strait, which use H₂). The
-effect is large where PHS is available: the Mediterranean PHS sites fall to **Tarifa
-\$82, Heraklion/Crete \$86, Sines \$89, Gela/Sicily \$91** (2030, real ERA5) — well below the
-H₂-firmed sites (Lanzarote \$104, Jutland \$114, Dover \$116) and approaching the firm
-hydro (\$46) / geothermal (\$63) leaders. Most striking: **Crete and Sicily are *infeasible* at
-85% RE+gas** (too little wind for an 85%-variable-RE firm build) **yet become cheap, fully
-zero-carbon with PHS** — its 0.80 round-trip firms low-wind solar across multi-day gaps where green
-H₂ (0.35) and gas cannot economically. The converse also shows: **Switzerland (\$118) and Romania
-(\$121)** have the PHS topography but weaker local solar/wind, so PHS alone doesn't make them cheap —
-their real edge is firm *conventional* hydro generation, not RE+storage. So the model's verdict is
-nuanced and defensible: PHS is transformative **only where good RE *and* pumped-storage terrain
-coincide** — which is exactly the Iberian/Mediterranean sun + sierra combination.
+site and shows them side by side — two table columns, an open-circle marker on each bar for the
+firming *not* chosen, and **two maps** (one per firming, shared colour scale) — with PHS
+availability from the **ANU Global Pumped Hydro Atlas**. Where strong sun+wind **co-locates** with
+reservoir terrain — the Iberian/Mediterranean sierras and mountainous islands (Tarifa, Sines,
+SW Sicily, East Crete, Gran Canaria with its real Chira-Soria scheme) — PHS is markedly cheaper
+than H₂ (**Crete \$75 / Tarifa \$82 / Sicily \$84** vs ~\$105–127 via H₂), approaching the firm
+hydro (\$46) / geothermal (\$63) leaders, because its 0.80 round-trip wastes far less overbuild
+than H₂'s 0.35.
+
+Two honesty points the relocation to real wind resources surfaced. **(1) Wind and PHS terrain are
+not always co-located.** Mountainous islands have both; but **Romania**'s wind is on the flat Black
+Sea coast (Dobrogea, its windiest region) while its pumped storage is inland in the Carpathians, so
+the single-site off-grid model firms Dobrogea with H₂ (≈\$144) — combining the two would need a grid.
+**Switzerland** is genuinely wind-poor (best Jura wind CF ≈0.04), so even with world-class PHS its
+off-grid RE+PHS cost is high (≈\$130) — its real edge is firm *conventional* hydro generation.
+**(2) In carbon-priced EU, partial-gas is not the cheap fallback:** the 75%-RE+gas build undercuts
+the fully-clean one only at the flat sites where clean firming (H₂) is itself dear (Jutland, Dover);
+where PHS makes clean firming cheap, **going 100% zero-carbon beats 75%-RE-plus-gas**, because
+carbon-taxed gas costs more than the extra clean storage. So the verdict is nuanced and defensible:
+PHS is transformative **only where good sun/wind *and* pumped-storage terrain coincide**.
 
 **Pure gas reference** (CCGT at 85% CF, verified values):
 
