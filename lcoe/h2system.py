@@ -22,7 +22,7 @@ from scipy.optimize import minimize
 from .params import LDES_PRESETS, GAS_H2
 from .costs import (cumulative_capacity, wright_law, rewacc_lcoe, crf,
                     h2_system_cost_split)
-from .weather import solar_clearsky, generate_weather_year
+from .weather import solar_clearsky, generate_weather_portfolio
 from .dispatch import dispatch_h2_vec
 
 _B_LFP = 6.0                                   # fixed diurnal optimum (matches run_ldes_joint)
@@ -64,8 +64,13 @@ def _optimize(ctx, prev_x=None, sol2d=None, win2d=None):
     def obj(x):
         return (_costs(x, ctx, sol2d, win2d)[0]
                 + 1e3 * float(np.sum((x - np.clip(x, _LO, _HI)) ** 2)))
-    starts = [prev_x] if prev_x is not None else [np.array([9.0, 6.0, 0.6, 60.0]),
-                                                  np.array([13.0, 9.0, 1.0, 120.0])]
+    # v5.9.1: the cold starts run EVERY year (pre-v5.9.1 only the warm start did
+    # after year 0, so a lagging warm start's suboptimality was unmonitored — the
+    # main path's multi-start discipline now applies here too; the warm start
+    # keeps the trajectory smooth where it is genuinely optimal).
+    starts = [np.array([9.0, 6.0, 0.6, 60.0]), np.array([13.0, 9.0, 1.0, 120.0])]
+    if prev_x is not None:
+        starts = [prev_x] + starts
     best_x, best_f = None, np.inf
     for x0 in starts:
         res = minimize(obj, np.clip(x0, _LO, _HI), method="Nelder-Mead",
@@ -121,9 +126,16 @@ def h2_system_trajectory(solar, wind, battery, mean_irr, mean_wind_ms, sys, year
         rng = np.random.default_rng(seed + 5)
         cs = solar_clearsky(mean_irr, getattr(sys, "solar_performance_ratio", 1.0))
         sol2d = np.empty((n_eval, 8760)); win2d = np.empty((n_eval, 8760))
+        # v5.9.1: same multi-site portfolio seam as the main dispatch path, so a
+        # n_sites>1 config no longer faces harsher Dunkelflaute tails on the H₂
+        # line than on the RE-target lines it is drawn against. n_sites=1
+        # (default) reduces exactly to the single-site generator.
         for k in range(n_eval):
-            s, w = generate_weather_year(
-                cs, mean_wind_ms, rng, wind_solar_corr=sys.wind_solar_corr,
+            s, w = generate_weather_portfolio(
+                cs, mean_wind_ms, rng, n_sites=sys.n_sites,
+                site_synoptic_corr=sys.site_synoptic_corr,
+                site_local_corr=getattr(sys, "site_local_corr", 0.4),
+                wind_solar_corr=sys.wind_solar_corr,
                 syn_loading=sys.syn_loading, syn_persistence=sys.syn_persistence,
                 cloud_ar1=sys.cloud_ar1, wind_ar1=sys.wind_ar1,
                 wind_daily_share=sys.wind_daily_share, wind_seasonal_amp=sys.wind_seasonal_amp,

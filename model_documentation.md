@@ -111,6 +111,18 @@ the admissible one-sided cost understatement at ≈$2/MWh (safe because exact RE
 RE). All headline outputs regenerated; four new regression tests lock the invariants
 (realized-ρ, Beta marginal, CF anchor, exact-point ≡ surface at grid nodes).
 
+*v5.9.1 — the four residual audit items.* (g) **P90 coherence** (opt-in `use_p90` paths):
+the shed branch gains true P90 surfaces (`drop_p90`, `gas_peak_p90`), and the firm branch's
+P90 gas energy is now the percentile of the per-year **gas+drop sum** (`gas_firm_p90`) with
+P90 capacity sizing implied — pre-v5.9.1 the gas energy was P90 but the shed add-back and
+capacity peak were means. (h) The **fig1 H₂ optimiser multi-starts every year** (the two cold
+starts now run alongside the warm start, closing the unmonitored warm-start-drift gap).
+(i) `run_ldes_overlay`'s locally-duplicated LDES annualisation now **delegates to
+`costs.ldes_annual_cost`** (the last duplicated cost formula; the B=0 buy-all-H₂ candidate
+keeps its explicit power-only form since the turbine is installed regardless). (j) The
+**H₂/LDES analysis paths use the multi-site portfolio seam** (`n_sites=1` default reduces
+exactly to single-site), removing the last fidelity asymmetry vs the main dispatch path.
+
 **v5.8 — June-2026 input recalibration (gas capex shock, battery reality, wind repricing,
 real-WACC consistency).** A pure *input* recalibration — no methodology changes — fixing the
 places where the world moved away from the mid-2025 calibration, all verified against current
@@ -1592,12 +1604,9 @@ Remaining known accuracy items, with directions of bias (all small):
 - **Wind seasonal modulation** (±12% winter amplification) passes through the cubic power
   curve, so it preserves mean *speed* exactly but shifts regional CF by ≈∓1.5% (Jensen) —
   the simulated CFs that anchor the cost basis already include this.
-- **P90 sizing caveats (opt-in):** with `use_p90=True` the gas energy is P90 but the firm shed
-  add-back and (unless `firm_gas_sizing="p90"`) the capacity peak remain means; the
-  shed-economic branch has no P90 capacity surface.
-- **The fig1 H₂ trajectory warm-starts each year from the previous optimum** (single NM start
-  after year 0) without the main path's ≤1% tie-break bound — drift is unmonitored but bounded
-  in practice by the smooth year-to-year cost changes.
+*(The audit's two remaining implementation items — the P90 sizing incoherences and the fig1
+H₂ warm-start-only optimisation — were closed in v5.9.1, along with the last duplicated LDES
+cost formula and the H₂/LDES paths' single-site-only weather seam.)*
 
 **Optimiser grid resolution (addressed in v5.1).** The optimiser interpolates trilinearly
 into a precomputed `grid_steps`³ gas-fraction surface. v5 used 15 nodes over oversized

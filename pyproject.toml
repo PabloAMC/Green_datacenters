@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "offgrid-datacenter-lcoe"
-version = "5.9.0"
+version = "5.9.1"
 description = "Least-cost solar/wind/battery/gas mix for an off-grid datacenter at a target renewable fraction (US & Europe), and the year renewables beat gas."
 readme = "README.md"
 requires-python = ">=3.10"

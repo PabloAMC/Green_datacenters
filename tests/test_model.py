@@ -483,6 +483,25 @@ def test_mean_solar_cf_anchor_exact():
         assert abs(cf / (irr / 24.0) - 1.0) < 0.005, f"CF {cf:.4f} vs {irr/24:.4f}"
 
 
+def test_p90_surfaces_coherent():
+    """v5.9.1: the P90 design path uses coherent per-year percentiles — drop_p90,
+    gas_peak_p90, and gas_firm_p90 (P90 of the per-year gas+drop SUM, not
+    P90(gas)+mean(drop)) — and each P90 statistic dominates its mean."""
+    import numpy as np
+    sim = _tiny_sim()
+    pt = (6.0, 6.0, 20.0)
+    st = sim.exact_point(*pt)
+    assert st["gas_p90"] >= st["gas_mean"] - 1e-12
+    assert st["drop_p90"] >= st["drop_mean"] - 1e-12
+    assert st["gas_peak_p90"] >= st["gas_peak_mean"] - 1e-12
+    # coherent firm P90: percentile of the sum, bounded by the sum of percentiles
+    assert st["gas_firm_p90"] >= st["gas_mean"] + st["drop_mean"] - 1e-12
+    assert st["gas_firm_p90"] <= st["gas_p90"] + st["drop_p90"] + 1e-12
+    # surfaces exist and match exact at a grid node
+    assert abs(st["gas_firm_p90"] - sim.interp3(sim.gas_firm_p90, *pt)) < 1e-12
+    assert abs(st["drop_p90"] - sim.interp3(sim.drop_p90, *pt)) < 1e-12
+
+
 def test_exact_point_matches_surface_at_grid_node():
     """v5.9: `exact_point` re-dispatches the stored weather; at a grid node it must
     reproduce the precomputed surface values exactly (same waterfall, same traces)."""

@@ -1,6 +1,6 @@
 {
-  "model_version": "5.9.0",
-  "git_commit": "ef9a66b",
+  "model_version": "5.9.1",
+  "git_commit": "9ce56f0",
   "year": 2035,
   "data": {
     "us": [
@@ -13,13 +13,13 @@
       {
         "key": "sw90",
         "label": "Solar + wind + battery (90% renewable, ~10% gas)",
-        "value": 107.0,
+        "value": 112.0,
         "color": "#9a8c7a"
       },
       {
         "key": "wind_selfmade",
         "label": "Solar + wind + battery + hydrogen (self-made)",
-        "value": 110.0,
+        "value": 113.0,
         "color": "#2a9d5c"
       },
       {
@@ -45,13 +45,13 @@
       {
         "key": "sw90",
         "label": "Solar + wind + battery (90% renewable, ~10% gas)",
-        "value": 135.0,
+        "value": 139.0,
         "color": "#9a8c7a"
       },
       {
         "key": "wind_selfmade",
         "label": "Solar + wind + battery + hydrogen (self-made)",
-        "value": 118.0,
+        "value": 119.0,
         "color": "#2a9d5c"
       },
       {

@@ -85,7 +85,8 @@ class ChronologicalSimulator:
         (self.gas_mean, self.gas_p90, self.fec_mean, self.gas_peak_mean,
          self.gas_peak_firm_mean, self.drop_mean,
          self.sol_cf_mean, self.win_cf_mean,
-         self.gas_peak_firm_p90) = self._run_mc(seed)
+         self.gas_peak_firm_p90,
+         self.drop_p90, self.gas_peak_p90, self.gas_firm_p90) = self._run_mc(seed)
         print("  [Sim] Done.")
 
     def _dispatch_one_year(self, sol_tr: np.ndarray,
@@ -221,7 +222,13 @@ class ChronologicalSimulator:
                 all_fec.mean(0), all_gas_peak.mean(0), all_gas_peak_firm.mean(0),
                 all_drop.mean(0),
                 float(np.mean(cf_s_list)), float(np.mean(cf_w_list)),
-                np.percentile(all_gas_peak_firm, 90, axis=0))
+                np.percentile(all_gas_peak_firm, 90, axis=0),
+                # v5.9.1 P90 coherence: the shed-branch P90 surfaces, and the FIRM
+                # gas-energy P90 taken on the per-year SUM gas+drop (a coherent
+                # year-percentile, not P90(gas)+mean(drop)).
+                np.percentile(all_drop, 90, axis=0),
+                np.percentile(all_gas_peak, 90, axis=0),
+                np.percentile(all_gas + all_drop, 90, axis=0))
 
     def exact_point(self, C_sol: float, C_win: float, B: float) -> dict:
         """
@@ -254,6 +261,9 @@ class ChronologicalSimulator:
             "gas_peak_firm_mean": float(gas_pf.mean()),
             "gas_peak_firm_p90": float(np.percentile(gas_pf, 90)),
             "drop_mean": float(drop_f.mean()),
+            "drop_p90": float(np.percentile(drop_f, 90)),
+            "gas_peak_p90": float(np.percentile(gas_p, 90)),
+            "gas_firm_p90": float(np.percentile(gas_f + drop_f, 90)),
         }
         self._exact_cache[key] = out
         return out
@@ -332,7 +342,11 @@ def dispatch_ldes_overlay(clearsky, mean_wind, rng, weather_kwargs,
     soc_ldes_max = B_ldes       # MWh per MW-load
 
     for _ in range(int(n_mc)):
-        sol, win = generate_weather_year(clearsky, mean_wind, rng, **weather_kwargs)
+        # v5.9.1: portfolio seam (n_sites=1 reduces exactly to the single-site
+        # generator), so the LDES overlay sees the same diversified weather as
+        # the main path when a multi-site config is in use.
+        sol, win = generate_weather_portfolio(clearsky, mean_wind, rng,
+                                              **weather_kwargs)
         soc_lfp = 0.0
         soc_ld = np.zeros(K)
         gas = np.zeros(K); peak = np.zeros(K); ldes_dis = np.zeros(K)

@@ -67,7 +67,6 @@ def optimal_cost_3d(
     Returns (total, c_gen, c_stor, c_gas, c_pen, C_sol*, C_win*, B*, f_drop*).
     """
     n         = sys.project_lifetime_yr
-    surface   = sim.gas_p90 if use_p90 else sim.gas_mean
     penalty_w = 2000.0   # $/MWh per unit RE shortfall (quadratic below)
     shed_val  = sim.workload.shed_penalty_mwh
 
@@ -87,21 +86,27 @@ def optimal_cost_3d(
         used for the final reported optimum so the headline numbers come from true
         dispatch, not the trilinear surface. None → interpolated (fast; used for
         all optimisation-loop evaluations)."""
-        if stats is None:
-            f_gas_shed = sim.interp3(surface, C_sol, C_win, B)
-            f_drop_max = sim.interp3(sim.drop_mean, C_sol, C_win, B)
-            fec        = sim.interp3(sim.fec_mean, C_sol, C_win, B)
-        else:
-            f_gas_shed = stats["gas_p90" if use_p90 else "gas_mean"]
-            f_drop_max = stats["drop_mean"]
-            fec        = stats["fec_mean"]
+        # v5.9.1 P90 coherence: with use_p90 every quantity is the P90 of the SAME
+        # per-year statistic (drop_p90, gas_peak_p90, and gas_firm_p90 = P90 of the
+        # per-year gas+drop sum) — pre-v5.9.1 the gas energy was P90 but the firm
+        # add-back and the shed-branch capacity peak were means.
+        def _surf(name_mean, name_p90):
+            key = name_p90 if use_p90 else name_mean
+            return stats[key] if stats is not None else sim.interp3(
+                getattr(sim, key), C_sol, C_win, B)
+        fec = (stats["fec_mean"] if stats is not None
+               else sim.interp3(sim.fec_mean, C_sol, C_win, B))
         if shed_is_economic:
-            f_gas, f_drop = f_gas_shed, f_drop_max
-            f_peak = (stats["gas_peak_mean"] if stats is not None
-                      else sim.interp3(sim.gas_peak_mean, C_sol, C_win, B))
+            f_gas   = _surf("gas_mean", "gas_p90")
+            f_drop  = _surf("drop_mean", "drop_p90")
+            f_peak  = _surf("gas_peak_mean", "gas_peak_p90")
         else:   # firm: gas serves the would-be-shed energy too; size to firm peak
-            f_gas, f_drop = f_gas_shed + f_drop_max, 0.0
-            use_firm_p90 = getattr(sys, "firm_gas_sizing", "mean") == "p90"
+            f_gas, f_drop = _surf("gas_mean", "gas_firm_p90"), 0.0
+            if not use_p90:   # mean path: firm gas energy = gas + would-be-shed
+                f_gas = f_gas + (stats["drop_mean"] if stats is not None
+                                 else sim.interp3(sim.drop_mean, C_sol, C_win, B))
+            use_firm_p90 = (use_p90
+                            or getattr(sys, "firm_gas_sizing", "mean") == "p90")
             if stats is not None:
                 f_peak = stats["gas_peak_firm_p90" if use_firm_p90
                                else "gas_peak_firm_mean"]
