@@ -86,29 +86,115 @@ def parity_table(d):
             f"<tbody>{''.join(rows)}</tbody></table>")
 
 
+def _load_optional(name):
+    path = os.path.join(ROOT, "output", name)
+    if not os.path.exists(path):
+        return None
+    with open(path) as fh:
+        return json.load(fh)
+
+
 def findings(us, eu):
     def py(d, R):
         return _parity_year(d["years"], d["scenarios"][R]["lcoe"], d["gas_pure"])
-    eu70, eu90 = py(eu, "0.70"), py(eu, "0.90")
-    us70, us90 = py(us, "0.70"), py(us, "0.90")
+    eu70, eu85, eu90 = py(eu, "0.70"), py(eu, "0.85"), py(eu, "0.90")
+    yrs = eu["years"]
+    eu90_2040 = eu["scenarios"]["0.90"]["lcoe"][-1]
+    h2 = eu["h2_system"]["lcoe"]
+    h2_cross = _parity_year(yrs, h2, eu["gas_pure"])
+
+    # Solar-only vs solar+wind (tools/build_solar_only.py export)
+    so = _load_optional("solar_only_results.json")
+    solo_wall = wind_max = solo_vs = ""
+    if so:
+        d = so["data"]["eu"]
+        solo_wall = f"{100*d['solo']['max_re']:.0f}%"
+        wind_max = f"{100*d['wind']['max_re']:.0f}%"
+        # cost with vs without wind at the highest target the solar-only build can reach
+        re_common = max(r for r, _ in d["solo"]["points"] if any(abs(r - rw) < 1e-9 for rw, _ in d["wind"]["points"]))
+        c_solo = next(c for r, c in d["solo"]["points"] if abs(r - re_common) < 1e-9)
+        c_wind = next(c for r, c in d["wind"]["points"] if abs(r - re_common) < 1e-9)
+        solo_vs = (f" At the same {100*re_common:.0f}% target ({so['year']}, EU), the no-wind build "
+                   f"delivers ${c_solo:.0f}/MWh vs ${c_wind:.0f} with wind.")
+
+    # EU siting ranking (tools/build_eu_siting.py export)
+    es = _load_optional("eu_siting_results.json")
+    siting_txt = ""
+    phs_vs_h2 = ""
+    if es:
+        i = es["sites"][0]["years"].index(es["ranking_year"])
+        ranked = sorted(es["sites"], key=lambda s: s["delivered"][i])
+        top = ", ".join(f"{s['label'].split(' (')[0]} ≈${s['delivered'][i]:.0f}" for s in ranked[:5])
+        siting_txt = (f"At {es['ranking_year']}, the cheapest 24/7 carbon-free sites are: {top} "
+                      f"(per-site real ERA5 weather, {es['sites'][0]['weather']}).")
+        both = [s for s in es["sites"] if s.get("delivered_phs") and s.get("delivered_h2")]
+        if both:
+            saves = [s["delivered_h2"][i] - s["delivered_phs"][i] for s in both]
+            phs_vs_h2 = (f" Where terrain allows pumped storage, it firms the same sun+wind for "
+                         f"${min(saves):.0f}–{max(saves):.0f}/MWh less than green H₂ at "
+                         f"{es['ranking_year']} — often the difference between a marginal site "
+                         f"and a competitive one.")
+
+    smr_us, smr_eu = us.get("smr"), eu.get("smr")
+
     items = [
-        f"<b>Europe — renewables already win at moderate shares.</b> Carbon-priced, expensive "
-        f"EU gas (rising from ${eu['gas_pure'][0]:.0f} to ${eu['gas_pure'][-1]:.0f}/MWh) "
-        f"means a firm 70%-renewable build reaches parity ~{eu70:.0f}, and even a "
-        f"90%-renewable one by ~{eu90:.0f}.",
-        f"<b>US — cheap gas is a moat at high renewable shares.</b> Untaxed ~$46/MWh gas "
-        f"keeps a 90%-renewable build off parity beyond {us['years'][-1]} (US 90% crossover "
-        f"{_crossover(us,'0.90')}); only moderate-share builds cross, in the mid-to-late 2030s.",
-        "<b>A firm battery-only system tops out near ~94% renewable.</b> Multi-day Dunkelflaute "
-        "neither sun nor wind covers, and battery power can't bridge days — the last few "
-        "percent always fall to gas. Going higher needs long-duration storage or hydrogen.",
-        f"<b>A fully gas-free, zero-carbon datacenter is feasible.</b> A co-optimised "
-        f"solar+wind+battery+green-hydrogen build delivers ${eu['h2_system']['lcoe'][0]:.0f}→"
-        f"${eu['h2_system']['lcoe'][-1]:.0f}/MWh in the EU, crossing below gas around "
-        f"{'%.0f' % _parity_year(eu['years'], eu['h2_system']['lcoe'], eu['gas_pure'])}.",
-        "<b>Where you build dominates the cost.</b> Across a poor→good site in a region the "
-        "90%-renewable delivered cost spans tens of $/MWh (the shaded bands in the figures); a "
-        "multi-site portfolio softens the multi-day lulls and cuts high-renewable cost materially.",
+        # 1 ── Europe: how much renewables makes economic sense
+        f"<b>Europe — roughly half renewable is already the <i>cheapest</i> build, and "
+        f"~three-quarters by 2030.</b> Against expensive, carbon-priced gas (rising "
+        f"${eu['gas_pure'][0]:.0f}→${eu['gas_pure'][-1]:.0f}/MWh), a pure cost-minimiser with "
+        f"no green mandate lands at ≈50% renewable today and ≈75% from 2030 on (≈3.5–4× solar "
+        f"+ 1.5× wind + 6h battery; reduced-fidelity estimate). Pushing beyond the optimum is "
+        f"cheap insurance, not a sacrifice: 70–80% targets beat gas from ~{eu70:.0f}, 85% from "
+        f"~{eu85:.0f}, and even a 90% build crosses by ~{eu90:.0f}.",
+        # 2 ── solar+batteries vs solar+wind+batteries
+        f"<b>Batteries get you through the night; wind gets you through the winter.</b> A "
+        f"solar+battery system hits a hard wall at ≈{solo_wall or '68%'} renewable: batteries "
+        f"shift hours, but no affordable battery bridges a week-long Dunkelflaute. Adding wind "
+        f"— whose lulls don't coincide with overcast spells — extends the firm system to "
+        f"≈{wind_max or '93%'}.{solo_vs} Even then a battery-only firm system tops out near "
+        f"~94%; the last few percent need long-duration storage or hydrogen.",
+        # 3 ── the firming choice
+        f"<b>The firming choice — what covers the dark, windless weeks — moves the bill more "
+        f"than the panels do.</b> Gas is the cheap-but-emitting default; purchasing green H₂ "
+        f"for the same turbine adds ≈$25–30/MWh (a premium that narrows as EU carbon rises); "
+        f"<i>self-produced</i> H₂ (electrolyser + tank storage, charged on surplus sun) makes a "
+        f"fully gas-free build deliver ${h2[0]:.0f}→${h2[-1]:.0f}/MWh in the EU, crossing below "
+        f"gas ~{h2_cross:.0f}.{phs_vs_h2}",
+        # 4 ── nuclear / SMR
+        (f"<b>Small modular nuclear: a glide-path reference, not today's competitor.</b> SMRs "
+         f"are modelled deliberately simply — an exogenous reference line (never part of the "
+         f"optimisation): first-of-a-kind ≈${smr_us[0]:.0f}/MWh (US) / ${smr_eu[0]:.0f} (EU) "
+         f"declining linearly to an ${smr_us[-1]:.0f} n-th-of-a-kind over 10–12 years, then "
+         f"flat — no Wright's-Law learning, since there is no deployed fleet to learn from. On "
+         f"that glide an ${smr_us[-1]:.0f} NOAK undercuts the EU deep-renewable builds (90% ≈ "
+         f"${eu90_2040:.0f} in 2040) <i>if</i> NOAK costs materialise — the big if, given FOAK "
+         f"history — but never approaches cheap US gas (${us['gas_pure'][0]:.0f})."
+         if smr_us and smr_eu else
+         "<b>Small modular nuclear: a glide-path reference, not today's competitor.</b> SMRs "
+         "enter as an exogenous FOAK→NOAK reference line, never part of the optimisation."),
+        # 5 ── the US comparison
+        f"<b>The US is a different planet: cheap gas is the moat.</b> At $4/MMBtu, renewables "
+        f"compete with a ~$29/MWh <i>fuel</i> bill, not the ${us['gas_pure'][0]:.0f} all-in "
+        f"LCOE — so the pure cost-optimum is ≈0% renewable today and only ~⅓ (solar-only, no "
+        f"battery) by 2040. Even 70–80% targets bottom out ≈$60 vs ${us['gas_pure'][0]:.0f} gas "
+        f"(crossover {_crossover(us,'0.70')}); they beat a stressed (+60% fuel) gas baseline by "
+        f"~2030. A clean US datacenter is a hedge against gas and carbon prices — in Europe it "
+        f"is simply the cheaper plant.",
+        # 6 ── best locations in Europe
+        f"<b>Where to build in Europe: water first, then sunny islands with height.</b> "
+        f"{siting_txt or 'Firm hydro (Norway, Sweden, the Alps) and Iceland geothermal beat every build-it-yourself sun+wind site.'} "
+        f"Firm hydro and geothermal sites skip the firming question entirely; among sun+wind "
+        f"sites, the winners are those whose resource co-locates with pumped-storage terrain "
+        f"(islands and sierras), while flat sites fall back on dearer H₂ firming.",
+        # 7 ── AI datacenters and the learning curve
+        "<b>AI datacenters don't just ride the learning curve — they pull it.</b> Every "
+        "doubling of cumulative deployment cuts battery system cost ~19% and solar ~25% "
+        "(Wright's Law; battery turnkey prices fell ~31% in 2025 alone). The deployment "
+        "trajectory behind these projections already leans on the AI clean-power buildout to "
+        "keep additions growing; GW-scale datacenter procurement lands on exactly the "
+        "technologies with the steepest curves — batteries above all — so each clean campus "
+        "pulls the parity years above forward for everyone else.",
+        # 8 ── kept from before
         "<b>Off-grid is itself a premium.</b> Staying on the grid with a renewable-energy "
         "contract sits <i>below</i> the off-grid high-renewable optimum in both regions — "
         "off-grid buys siting independence, at a cost.",
@@ -473,9 +559,12 @@ beats burning gas, across the US and Europe.</p>
 
 <div class="caveat"><b>Read this first.</b> This is a <b>stylised techno-economic model</b>:
 trust the <b>directional comparisons</b>, not absolute numbers to better than <b>~±20–30%</b>.
-The headline runs on <b>synthetic (not measured) weather</b> and a <b>single generation
-site</b> by default; both can be replaced with real reanalysis and multi-site portfolios.
-All numbers below are generated directly from the model's exported results.</div>
+The headline US/Europe trajectories and parity tables run on <b>synthetic (calibrated, not
+measured) weather</b> and a <b>single generation site</b>; the <b>per-state and siting
+sections further below instead use measured ERA5 reanalysis weather</b> (2018–2024) at each
+location, and the model accepts real weather (<code>--weather</code>) and multi-site
+portfolios (<code>--sites</code>) everywhere else. Numbers are generated from the model's
+exported results, except a few clearly-marked reduced-fidelity estimates in the findings.</div>
 
 <h2>The question: how dirty does an AI datacenter have to be?</h2>
 <p>The boom in AI datacenters has come with a worry that is now a headline in its own right —
@@ -549,11 +638,13 @@ Wright's-Law learning curves. Full derivations, data sources and the accuracy su
 <ul class="find">
 <li><b>Default = firm, always-on:</b> gas backup covers 100% of load during lulls, so the worst
 case is a known, capped fuel cost. Premium/AI workloads never shed and collapse to this case.</li>
-<li><b>Weather is synthetic</b> but structured (multi-day Dunkelflaute, region-specific
-resource and sun–wind correlation). A real-weather seam (<code>--weather</code>, ERA5/NSRDB)
-and a multi-site portfolio (<code>--sites</code>) are built in but opt-in.</li>
-<li><b>Single site by default</b> — the largest directional caveat; a geographic portfolio
-softens the tails and lowers high-renewable cost.</li>
+<li><b>Headline weather is synthetic</b> but structured (multi-day Dunkelflaute,
+region-specific resource and sun–wind correlation). The per-state and siting sections run on
+<b>measured ERA5 reanalysis</b> (2018–2024); the same real-weather seam
+(<code>--weather</code>, ERA5/NSRDB) and a multi-site portfolio (<code>--sites</code>) are
+available everywhere else but opt-in.</li>
+<li><b>Single site by default</b> — the largest directional caveat for the headline; a
+geographic portfolio softens the tails and lowers high-renewable cost.</li>
 <li><b>Not modelled:</b> sub-hourly load variation, on-site fuel logistics, transmission.</li>
 </ul>
 

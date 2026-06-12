@@ -43,7 +43,7 @@ def run_flex_sensitivity(region_key="eu", re_target=0.90, target_year=2030,
     if interruptibles is None:
         interruptibles = [0.0, 0.2, 0.4, 0.7, 0.95]
     if shed_penalties is None:
-        # straddle the gas variable cost (~$120/MWh in EU 2030) where shedding
+        # straddle the gas variable cost (~$100/MWh in EU 2030) where shedding
         # switches on; above it, premium compute never sheds (→ firm).
         shed_penalties = [25.0, 75.0, 150.0, 300.0, 700.0]
     cfg = REGIONS[region_key]
@@ -287,7 +287,10 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
                wind_ar1=sys.wind_ar1, wind_daily_share=sys.wind_daily_share,
                wind_seasonal_amp=sys.wind_seasonal_amp, wind_v_ci=sys.wind_v_ci,
                wind_v_rated=sys.wind_v_rated, wind_v_cutout=sys.wind_v_cutout)
-    clearsky = solar_clearsky(cfg["mean_irr"])
+    # Pass the performance ratio so the overlay sees the same derated resource as
+    # the main path (pre-v5.8 it silently ran on the undecorated clear-sky).
+    clearsky = solar_clearsky(cfg["mean_irr"],
+                              getattr(sys, "solar_performance_ratio", 1.0))
     rng = np.random.default_rng(seed + 7)
 
     cand = [(0.0, 0.0)] + [(c, s) for c in charge_set for s in storage_set]
@@ -397,7 +400,9 @@ def run_ldes_joint(region_key="eu", target_year=2035, ldes_tech="h2",
     sols, wins = [], []
     for _ in range(n_mc):
         s, w = generate_weather_year(
-            solar_clearsky(cfg["mean_irr"]), cfg["mean_wind_ms"], rng,
+            solar_clearsky(cfg["mean_irr"],
+                           getattr(sysp, "solar_performance_ratio", 1.0)),
+            cfg["mean_wind_ms"], rng,
             wind_solar_corr=sysp.wind_solar_corr, syn_loading=sysp.syn_loading,
             syn_persistence=sysp.syn_persistence, cloud_ar1=sysp.cloud_ar1,
             wind_ar1=sysp.wind_ar1, wind_daily_share=sysp.wind_daily_share,
