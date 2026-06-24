@@ -97,7 +97,9 @@ def _load_optional(name):
 def findings(us, eu):
     def py(d, R):
         return _parity_year(d["years"], d["scenarios"][R]["lcoe"], d["gas_pure"])
-    eu70, eu85, eu90 = py(eu, "0.70"), py(eu, "0.85"), py(eu, "0.90")
+    eu70, eu80, eu85, eu90 = py(eu, "0.70"), py(eu, "0.80"), py(eu, "0.85"), py(eu, "0.90")
+    def _cross(y):   # crossover year, or an honest "never within horizon"
+        return f"~{y:.0f}" if y else "not within the horizon"
     yrs = eu["years"]
     eu90_2040 = eu["scenarios"]["0.90"]["lcoe"][-1]
     h2 = eu["h2_system"]["lcoe"]
@@ -138,14 +140,15 @@ def findings(us, eu):
     smr_us, smr_eu = us.get("smr"), eu.get("smr")
 
     items = [
-        # 1 ── Europe: how much renewables makes economic sense
-        f"<b>Europe — roughly half renewable is already the <i>cheapest</i> build, and "
-        f"~three-quarters by 2030.</b> Against expensive, carbon-priced gas (rising "
-        f"${eu['gas_pure'][0]:.0f}→${eu['gas_pure'][-1]:.0f}/MWh), a pure cost-minimiser with "
-        f"no green mandate lands at ≈50% renewable today and ≈75% from 2030 on (≈3.5–4× solar "
-        f"+ 1.5× wind + 6h battery; reduced-fidelity estimate). Pushing beyond the optimum is "
-        f"cheap insurance, not a sacrifice: 70–80% targets beat gas from ~{eu70:.0f}, 85% from "
-        f"~{eu85:.0f}, and even a 90% build crosses by ~{eu90:.0f}.",
+        # 1 ── Europe: how much renewables makes economic sense (real France weather)
+        f"<b>Europe — moderate renewable shares beat expensive carbon-priced gas, but deep "
+        f"decarbonisation is dear on real French weather.</b> Against gas rising "
+        f"${eu['gas_pure'][0]:.0f}→${eu['gas_pure'][-1]:.0f}/MWh (carbon-priced), a 70% "
+        f"renewable build crosses below gas {_cross(eu70)} and 80% {_cross(eu80)}. But France's "
+        f"<i>measured</i> wind is poor (capacity factor 0.135), so riding out multi-day winter "
+        f"Dunkelflaute takes heavy overbuild (≈10× solar + 9× wind + 6h battery at 90%): 85% "
+        f"reaches parity only {_cross(eu85)}, and 90% does {_cross(eu90)} (to 2040). The cheap "
+        f"insurance is moderate RE; the last decile is a genuine premium on a poor-wind hub.",
         # 2 ── solar+batteries vs solar+wind+batteries
         f"<b>Batteries get you through the night; wind gets you through the winter.</b> A "
         f"solar+battery system hits a hard wall at ≈{solo_wall or '68%'} renewable: batteries "
@@ -638,13 +641,14 @@ Wright's-Law learning curves. Full derivations, data sources and the accuracy su
 <ul class="find">
 <li><b>Default = firm, always-on:</b> gas backup covers 100% of load during lulls, so the worst
 case is a known, capped fuel cost. Premium/AI workloads never shed and collapse to this case.</li>
-<li><b>Headline weather is synthetic</b> but structured (multi-day Dunkelflaute,
-region-specific resource and sun–wind correlation). The per-state and siting sections run on
-<b>measured ERA5 reanalysis</b> (2018–2024); the same real-weather seam
-(<code>--weather</code>, ERA5/NSRDB) and a multi-site portfolio (<code>--sites</code>) are
-available everywhere else but opt-in.</li>
-<li><b>Single site by default</b> — the largest directional caveat for the headline; a
-geographic portfolio softens the tails and lowers high-renewable cost.</li>
+<li><b>Headline weather is measured ERA5 reanalysis</b> (v6.0; 11 years, 2015–2025) at one
+representative data-center market per region — <b>US: ERCOT Texas, EU: France</b> — with real
+multi-day Dunkelflaute, sun–wind correlation and interannual spread. The imported LCOEs are
+re-levelled to each site's real capacity factor, so cost and energy stay on the same plant.
+A multi-site portfolio (<code>--sites</code>) is available but opt-in.</li>
+<li><b>Single real site</b> — the largest directional caveat for the headline; a single
+off-grid datacenter gets no geographic smoothing, and a portfolio would soften the tails and
+lower high-renewable cost.</li>
 <li><b>Not modelled:</b> sub-hourly load variation, on-site fuel logistics, transmission.</li>
 </ul>
 

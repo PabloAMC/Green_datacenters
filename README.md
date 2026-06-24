@@ -12,7 +12,7 @@ An optimization model that finds the least-cost combination of solar PV, onshore
 
 The **default model is a FIRM, always-on datacenter**: gas turbines are sized to cover **100% of load** whenever sun/wind are absent and batteries are exhausted, so the datacenter never shuts down and the worst case is a known, **capped opex** — a bounded operating (fuel) cost, since the fallback is simply to run on gas. Solar + wind + battery are an incremental investment that displaces gas fuel and carbon where it pays. Optionally, a workload can be made **interruptible** (cheap/spot compute), in which case the model sheds load only when the lost compute is worth less than the gas needed to serve it.
 
-**Design philosophy.** The model aims for *honest accounting* rather than a thumb on the scale in either direction. It charges every generated MWh — including curtailed surplus — at its true cost, never counts shed load as renewable, sizes firm gas backup to 100% of load, and rides out **multi-day wind+solar lulls** (Dunkelflaute) rather than merely hourly ones. Some assumptions cut against renewables (the headline assumes a *single* generation site with no geographic smoothing — though `--sites` now models a multi-site portfolio, which softens the multi-day lulls and can cut high-RE cost substantially; and no credit for free load-shedding) and some cut for them (low per-technology cost of capital for solar/wind; learning-curve cost declines to 2040), so the net bias is not one-directional. Results are therefore reported as **central estimates with explicit uncertainty** — P10–P90 cost bands, an optional P90 bad-weather design premium, and a sensitivity tornado — and should be read as **directional, accurate to roughly ±20–30%**, not precise to the dollar. The full methodology, derivations, data sources, and accuracy caveats live in **[`model_documentation.md`](model_documentation.md)**; the section below summarises the governing equations and parameters.
+**Design philosophy.** The model aims for *honest accounting* rather than a thumb on the scale in either direction. It charges every generated MWh — including curtailed surplus — at its true cost, never counts shed load as renewable, sizes firm gas backup to 100% of load, and rides out **multi-day wind+solar lulls** (Dunkelflaute) rather than merely hourly ones. **The headline runs on real ERA5 weather** (v6.0) at one representative market per region — US: ERCOT Texas, EU: France — with the imported LCOEs re-levelled to each site's measured capacity factor. Some assumptions cut against renewables (the headline is a *single* real site with no geographic smoothing — though `--sites` now models a multi-site portfolio, which softens the multi-day lulls and can cut high-RE cost substantially; and no credit for free load-shedding) and some cut for them (low per-technology cost of capital for solar/wind; learning-curve cost declines to 2040), so the net bias is not one-directional. Results are therefore reported as **central estimates with explicit uncertainty** — P10–P90 cost bands, an optional P90 bad-weather design premium, and a sensitivity tornado — and should be read as **directional, accurate to roughly ±20–30%**, not precise to the dollar. The full methodology, derivations, data sources, and accuracy caveats live in **[`model_documentation.md`](model_documentation.md)**; the section below summarises the governing equations and parameters.
 
 ---
 
@@ -168,10 +168,19 @@ $$
 
 WACC / life: solar **5.5% / 30 yr**, wind **5.5% / 25 yr**, battery **7% / 20 yr**, gas **9% / 25 yr**.
 
-### Weather (synthetic 8760-h, or real ERA5/NSRDB via the reanalysis hook)
+### Weather (real ERA5 headline, or synthetic 8760-h)
+
+**v6.0: the headline runs on measured ERA5 reanalysis** (11 years, 2015–2025) at one
+representative data-center market per region — **US: ERCOT Texas; EU: France** — via the
+`--weather` reanalysis hook. A single real site (a single off-grid datacenter gets no geographic
+smoothing), with its real cloud / Dunkelflaute / sun↔wind structure and interannual spread. The
+imported Lazard LCOEs are **re-levelled** from their synthetic reference CF to each site's real
+CF (capital held fixed; methodology §4.8), so cost and energy stay on the same plant. The
+synthetic generator below still backs the headline's *cost basis* (it sets the reference CF) and
+every sensitivity that needs the resource as a free knob (resource band, tornado, `--resource`):
 
 - **Solar:** a deterministic clear-sky shape × a daily cloud factor $\xi_d\sim\text{Beta}(3,1.5)$ (mean 0.667) with AR(1) day-to-day persistence. The clear-sky mean is normalised so the *effective* (post-cloud) annual CF equals $\bar I/24$ — no double-counting of cloud loss.
-- **Wind:** a Weibull($k{=}2.1$) speed run through an IEC power curve (cut-in 3, rated 11, cut-out 25 m/s — a modern low-specific-power turbine), with within-day AR(1) persistence and a winter seasonal lift.
+- **Wind:** a Weibull($k{=}2.1$) speed run through an IEC power curve (cut-in 3, rated 11, cut-out 25 m/s — a modern low-specific-power turbine), with within-day AR(1) persistence and a winter seasonal lift. The same curve converts ERA5 100 m wind to CF in `tools/fetch_era5.py`.
 - **Dunkelflaute:** a persistent synoptic common factor (loading $\lambda$, daily persistence $\varphi\approx0.82$–0.85, e-folding ≈5–6 days) jointly suppresses wind and solar for days; a Gaussian copula sets the wind–solar correlation ($\rho=-0.35$ in N. Europe). Marginals/CFs are preserved — only the multi-day *clustering* that storage/backup must cover changes.
 
 ### Battery — throughput cycling + augmentation

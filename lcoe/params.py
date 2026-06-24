@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, fields, replace
 
-MODEL_VERSION = "5.9.1"
+MODEL_VERSION = "6.0"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

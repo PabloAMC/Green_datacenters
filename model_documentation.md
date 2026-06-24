@@ -755,6 +755,41 @@ to ≈\$91 (5 sites, $c{=}0.5$) — a ~40% reduction — with mean solar/wind CF
 treat the *direction and rough magnitude* as robust and the exact figure as dependent on
 the inter-site correlation, which should be set from reanalysis for a specific portfolio.
 
+### 4.8 Real-weather headline & LCOE re-levelling (v6.0)
+
+Through v5.9 the headline ran on the synthetic generator (§4.1–4.6), calibrated so its mean
+CFs sat inside Lazard's bands (the v5.5 CF-consistency invariant). v6.0 instead drives the
+headline suite with **measured ERA5 reanalysis** at one representative data-center market per
+region — **US: ERCOT Texas; EU: France** — loaded through the same `weather_years` hook the
+`--weather` flag uses (`tools/fetch_era5.py` → `solar`/`wind` hourly CF, 11 years 2015–2025).
+A *single* real site is deliberate: a single off-grid datacenter gets one site's weather, not
+the geographic smoothing of a portfolio (§4.7), so the headline must not borrow it.
+
+**Why re-level.** The dispatch's per-MWh generation cost is `C · CF · LCOE` (§6): the imported
+Lazard LCOE is levelised at a *reference* CF, and multiplying by the simulated CF only recovers
+the right $/MWh when the two agree. Real ERA5 gives the *site's* CF, which generally differs.
+A panel or turbine costs the same `$/kW` wherever it stands, so we hold that capital fixed and
+re-express the LCOE at the real CF:
+
+$$\text{LCOE}_{\text{real}} = \text{LCOE}_{\text{today}} \cdot \frac{\text{CF}_{\text{ref}}}{\text{CF}_{\text{real}}}$$
+
+where $\text{CF}_{\text{ref}}$ is the synthetic CF for the region's resource (the Lazard-anchored
+basis) and $\text{CF}_{\text{real}}$ the mean CF of the supplied years. Substituting back,
+`C · CF_real · LCOE_real = C · CF_ref · LCOE_today`: **cost tracks the fixed capital while energy
+follows the real weather** — the CF-invariant, at the real site. It is applied once in
+`run_simulation` (scaling the `solar`/`wind` `lcoe_today`), so it propagates to every consumer —
+the RE-target lines, the gas-free H₂ line, the cost-MC band. Realised: **Texas** solar 0.265 /
+wind 0.320 (re-level ×0.86 / ×1.04 — sunny Texas makes solar *cheaper* per MWh); **France** solar
+0.183 / wind 0.135 (×0.86 / ×2.1 — poor French wind roughly doubles wind's $/MWh). The synthetic
+generator still backs every sensitivity that needs the resource as a free knob (resource band —
+auto-skipped under fixed real weather — tornado, `--resource`).
+
+**Caveat — the site carries the result.** A single real cell is only as representative as the
+cell. Inland low-wind sites read low (e.g. ERA5 Ashburn, VA: 100 m wind ~4.7 m/s → CF 0.085 via
+the §4.5 curve; a 100→150 m hub-height shear lifts it only to ~0.10), so the US anchor is Texas,
+whose measured resource matches the cost basis, rather than the #1-by-floorspace but
+pathologically-poor-wind Virginia. Re-fetch a precise point (`tools/fetch_era5.py`) to site-tune.
+
 ---
 
 ## 5. Chronological Dispatch
@@ -1488,10 +1523,21 @@ with real ERA5/NSRDB hourly-CF years instead of the synthetic generator (§12).
 ## 11. Key Results
 
 Headline = **FIRM (always-on)** workload: gas backup sized to 100% of load, nothing shed,
-capped opex. All values from `output/*_results.json` (June 2026; 50 MC weather years, 21³ grid,
-Dunkelflaute weather, per-tech WACC, v5.4 battery augmentation, v5.5 CF recalibration,
-**v5.8 input recalibration** — turbine-shortage gas capex, BNEF-2025 batteries, Lazard-2025
-wind, real-terms WACC).
+capped opex. All values from `output/*_results.json` (June 2026; 21³ grid, per-tech WACC,
+v5.4 battery augmentation, v5.5 CF recalibration, **v5.8 input recalibration** —
+turbine-shortage gas capex, BNEF-2025 batteries, Lazard-2025 wind, real-terms WACC; and the
+**v6.0 real-weather headline** — see below).
+**v6.0 — measured weather (June 2026).** The headline is now driven by **real ERA5 reanalysis**
+(11 years, 2015–2025) at a single representative data-center market per region — **US: ERCOT
+Texas; EU: France** — instead of the synthetic generator. One real site (no spurious
+geographic smoothing a single off-grid datacenter does not get), with its actual hourly cloud /
+Dunkelflaute / sun↔wind structure and real interannual spread. The imported Lazard LCOEs are
+**re-levelled** from their synthetic reference CF to each site's real CF (holding $/kW capital
+fixed; §4.8), so cost and energy still refer to the same plant. Realised CFs: **US solar 0.265 /
+wind 0.320** (Texas — close to the prior synthetic 0.23/0.33, so the US story barely moves),
+**EU solar 0.183 / wind 0.135** (France — markedly poorer wind than the prior 0.16/0.29, which
+makes high-RE Europe materially dearer). The synthetic generator still backs every sensitivity /
+siting analysis (resource band, tornado, `--resource`), which need the resource as a free knob.
 Premium/AI workloads collapse to firm under the economic shed test, so these are the relevant
 numbers for any valuable datacenter. (Tables regenerated from the export via
 `tools/regen_doc_tables.py`.)
@@ -1500,23 +1546,24 @@ numbers for any valuable datacenter. (Tables regenerated from the export via
 
 | RE target | 2025 ($/MWh) | 2030 | 2035 | 2040 | vs gas 2025 | Crossover |
 |-----------|-------------|------|------|------|-------------|-----------|
-| 70% | 88.3 | 74.5 | 67.3 | 62.2 | +51% | >2040 |
-| 80% | 93.0 | 76.0 | 67.9 | 62.5 | +59% | >2040 |
-| 85% | 106.7 | 87.1 | 77.5 | 71.6 | +83% | >2040 |
-| 90% | 154.4 | 126.2 | 112.0 | 103.0 | +165% | >2040 |
+| 70% | 82.9 | 71.6 | 65.1 | 60.4 | +42% | >2040 |
+| 80% | 88.9 | 72.7 | 65.1 | 60.4 | +52% | >2040 |
+| 85% | 100.3 | 82.6 | 73.8 | 68.4 | +72% | >2040 |
+| 90% | 137.3 | 111.4 | 98.6 | 90.6 | +135% | >2040 |
 | **Gas** | **58.4** | **58.4** | **58.4** | **58.4** | — | — |
 | *Grid+RE PPA (ref.)* | *85* | *69* | *62* | *57* | — | — |
 
 High-RE US never beats cheap untaxed gas within the horizon — $4/MMBtu → ~$58/MWh even at the
-v5.8 turbine-shortage capex is a very low, very stable baseline, and high-RE needs heavy wind
-overbuild to ride out multi-day lulls. The v5.8 recalibration moved *both* sides — gas +$12
-(capex 2×) but delivered RE up too (wind $50→$61, no spurious re-WACC discount) — and the
-v5.9 weather fixes add a further ~2–4% to high-RE cost (honestly more frequent 1-day solar
-droughts outweigh the restored wind complementarity in the US, where ρ=0): **moderate 70–80%
-RE still does not cross $58 gas by 2040** (the 70% line bottoms at ≈$62/MWh, a near-miss).
-The crossing happens only against a stressed gas baseline (the dot-dashed +60%-fuel reference
-line on fig1, ≈$74/MWh, which 70–80% RE beats by ~2031–32) — i.e. US RE competitiveness
-hinges on gas *not* staying at $4 forever.
+v5.8 turbine-shortage capex is a very low, very stable baseline, and high-RE needs heavy
+overbuild to ride out multi-day lulls. On **real ERCOT-Texas weather** (v6.0) the picture is
+essentially unchanged from the prior synthetic headline — Texas's measured resource (solar
+0.265 / wind 0.320) sits right where the Lazard cost basis assumed, so re-levelling barely moves
+the lines and **moderate 70–80% RE still does not cross $58 gas by 2040** (the 70% line bottoms
+at ≈$60/MWh, a slightly nearer near-miss than the synthetic ≈$62). The crossing happens only
+against a stressed gas baseline (the dot-dashed +60%-fuel reference line on fig1, ≈$74/MWh,
+which 70–80% RE beats by ~2031–32) — i.e. US RE competitiveness hinges on gas *not* staying at
+$4 forever. That this holds on *measured* Texas weather — including its real Dunkelflaute and
+interannual spread — is a stronger statement than the synthetic version it replaces.
 
 **95% RE is omitted: it is infeasible for a firm, battery-only off-grid system.** Over the
 whole 21³ build grid the maximum achievable annual RE fraction is ≈**0.94 (EU)** / ≈**0.95 (US)**:
@@ -1531,32 +1578,35 @@ exceeds this ceiling, rather than silently reporting the penalty-saturated point
 
 | RE target | 2025 ($/MWh) | 2030 | 2035 | 2040 | vs gas 2025 | Crossover |
 |-----------|-------------|------|------|------|-------------|-----------|
-| 70% | 109.6 | 98.5 | 97.7 | 95.5 | −10% | **~2025** |
-| 80% | 115.9 | 101.5 | 98.7 | 96.4 | −5% | **~2025** |
-| 85% | 131.8 | 111.2 | 104.3 | 100.1 | +9% | **~2027** |
-| 90% | 179.5 | 152.7 | 139.3 | 130.7 | +48% | **~2033** |
+| 70% | 135.2 | 119.1 | 115.8 | 113.7 | +11% | **~2027** |
+| 80% | 174.2 | 148.0 | 139.2 | 133.7 | +43% | **~2033** |
+| 85% | 225.9 | 187.7 | 171.7 | 161.6 | +86% | **~2040** |
+| 90% | 278.0 | 237.4 | 225.0 | 219.3 | +129% | >2040 |
 | **Gas** | **121.5** | **131.1** | **150.6** | **162.6** | — | — |
 | *Grid+RE PPA (ref.)* | *117* | *96* | *86* | *81* | — | — |
 
-EU gas is expensive and rising (carbon → logistic path toward $200/tCO₂). An always-on RE
-datacenter beats gas from ~2025 at 70–80% RE; **90% RE reaches parity ~2033** (v5.8 moved this
-~2030→~2032: delivered RE generation got dearer — wind repriced $48→$56, the re-WACC discount
-removed, solar learning trimmed to 0.25 — while EU gas rose only ~$8 on the capex shock, since
-fuel+carbon dominate its cost; the v5.9 weather fixes add ~one more year, the honestly more
-frequent 1-day solar droughts slightly outweighing the restored wind-when-overcast
-complementarity). The earlier history still holds — v4 claimed "90% parity Q2 2025", and the
-honesty fixes (no free load-shedding, multi-day Dunkelflaute, a resolved optimiser, no free
-demand-deferral) pushed that out to the 2030s; v5.5 corrected the *opposite* error (a CF below
-the imported cost basis) pulling 90% back toward the late 2020s, v5.7 settled it at ~2030 with
-a defensible deployment trajectory, and the v5.8/v5.9 recalibration + hardening land it at
-~2033. (95% RE omitted — infeasible for the battery-only firm system, see the US note above.)
+EU gas is expensive and rising (carbon → logistic path toward $200/tCO₂), so even on poor
+weather *moderate* RE stays competitive — but **real French weather (v6.0) makes deep
+decarbonisation markedly dearer and pushes high-RE parity out of the horizon.** France's
+measured wind CF is only **0.135** — far below the prior synthetic EU 0.29 — so wind is both
+weaker and, after re-levelling, ~2× costlier per MWh, and riding out multi-day winter lulls now
+takes heavy solar+wind overbuild. The result: **70% RE still beats rising EU gas by ~2027**
+($135/MWh in 2025 → $114 by 2040, crossing the $122→$163 gas line ~2027), and **80% crosses
+~2033**; but **85% reaches parity only ~2040 and 90% not within the horizon** (90% is $278/MWh
+in 2025, still $219 in 2040 vs $163 gas). This is a real shift from the prior synthetic headline
+(which put 90% parity ~2033): the synthetic 0.29 wind was really a *good* EU site, and France —
+a fast-growing, nuclear-heavy data-center hub — is a genuinely poorer-wind one. The high-level
+history still holds — v4's "90% parity Q2 2025" was an artefact of free load-shedding and no
+multi-day Dunkelflaute; the honesty fixes pushed it to the 2030s; v5.5–v5.9 settled the
+*synthetic* 90% line near ~2033 — and v6.0 now shows that on a real poorer-wind hub, 90% off-grid
+RE simply does not reach cheap-firming parity by 2040. (95% RE omitted — infeasible for the
+battery-only firm system, see the US note above.)
 
-**Optimal EU 90% RE build (2025):** ≈ **6.6× solar + 5.0× wind + 6h storage** — roughly half
-the nameplate overbuild of the pre-v5.5 ~11× solar + 10× wind, because the CF-consistent
-resource (solar 0.16 / wind 0.29) generates the same energy from far less capacity. Storage
-stays ~6h: the binding constraint is multi-day Dunkelflaute energy, which generation overbuild
-covers more cheaply than batteries. (The v5.8/v5.9 shifts barely move the year-0 optimum —
-slightly more solar, same wind and storage.)
+**Optimal EU 90% RE build on real French weather (2025):** ≈ **9.9× solar + 9.0× wind + 6h
+storage** — much heavier than the prior synthetic ~6.6× solar + 5.0× wind, because France's poor
+real wind (CF 0.135) forces large overbuild of both to cover multi-day winter Dunkelflaute.
+Storage stays ~6h: the binding constraint is multi-day lull *energy*, which generation overbuild
+covers more cheaply than batteries (a 5-day lull would need ~120h of storage; see below).
 
 ### Why so much overbuild but only ~6h of battery?
 
