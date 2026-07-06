@@ -82,7 +82,7 @@ def _optimize(ctx, prev_x=None, sol2d=None, win2d=None):
 
 def h2_system_trajectory(solar, wind, battery, mean_irr, mean_wind_ms, sys, years,
                          seed=42, ldes_tech="h2", n_mc=None, n_mc_opt=20,
-                         weather_years=None):
+                         weather_years=None, year_subset=None):
     """Per-year optimum of the gas-free H₂ system → trajectory + cost breakdown
     (year-indexed arrays of delivered LCOE, build, and the fig6 capex/opex bands).
 
@@ -98,7 +98,12 @@ def h2_system_trajectory(solar, wind, battery, mean_irr, mean_wind_ms, sys, year
     years (e.g. from `weather.load_weather_traces`). When given, the dispatch ensemble is
     these real years INSTEAD of the synthetic generator — so the H₂/storage sizing sees
     real cloud/Dunkelflaute structure and real interannual variability. `mean_irr` /
-    `mean_wind_ms` / `n_mc` are then ignored for the weather draw."""
+    `mean_wind_ms` / `n_mc` are then ignored for the weather draw.
+
+    `year_subset`: optional list of year indices (0 = 2025) to optimise — the other
+    entries of the returned arrays stay 0. Used by the Europe-wide scan
+    (`tools/scan_eu.py`), which scores ~800 grid cells at a single milestone year and
+    cannot afford the full trajectory at each. Default None = every year (unchanged)."""
     batt = battery
     ldes = LDES_PRESETS[ldes_tech]
     n = sys.project_lifetime_yr
@@ -151,7 +156,7 @@ def h2_system_trajectory(solar, wind, battery, mean_irr, mean_wind_ms, sys, year
     out.update({k: np.zeros(years + 1) for k in
                 ("lcoe", "C_sol", "C_win", "B_lfp", "P_elec", "B_h2", "buy_frac")})
     prev = None
-    for i in range(years + 1):
+    for i in (range(years + 1) if year_subset is None else sorted(year_subset)):
         ctx = dict(batt=batt, ldes=ldes, n=n, sol2d=sol2d, win2d=win2d,
                    CF_sol=CF_sol, CF_win=CF_win, lcoe_sol=float(lcoe_sol[i]),
                    lcoe_win=float(lcoe_win[i]), om_sol=solar.om_frac_lcoe,
