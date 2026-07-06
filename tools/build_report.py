@@ -211,6 +211,16 @@ def findings(us, eu):
                          f"${min(saves):.0f}–{max(saves):.0f}/MWh less than green H₂ — often the "
                          f"difference between a marginal site and a competitive one. ")
 
+    # Continent scan (tools/scan_eu.py export) — one-sentence addendum to the siting finding.
+    sc = _load_optional("eu_scan_results.json")
+    scan_note = ""
+    if sc:
+        top = sorted((c for c in sc["cells"] if c["lat"] >= 35), key=lambda c: c["lcoe"])
+        scan_note = (f" A {sc['n_cells']}-cell scan of the whole continent adds: for a "
+                     f"build-it-yourself system, the cheapest geography is the windy North "
+                     f"Sea/Baltic edge (~${top[0]['lcoe']:.0f}–{top[9]['lcoe']:.0f}/MWh), "
+                     f"not the sunny south.")
+
     smr_us, smr_eu = us.get("smr"), eu.get("smr")
     if smr_us and smr_eu:
         smr_support = (f"Modelled as an exogenous reference line, first-of-a-kind "
@@ -265,12 +275,12 @@ def findings(us, eu):
          f"renewable today and only ~⅓ (solar-only, no battery) by 2040. A clean US "
          f"datacenter is a hedge against gas and carbon prices; in Europe it is simply "
          f"the cheaper plant."),
-        ("Where to build in Europe: water first, then sunny islands with height.",
+        ("Where to build in Europe: water first, then windy coasts and sunny islands.",
          siting_txt,
          "Firm hydro and geothermal sites skip the firming question entirely. Among "
          "sun+wind sites, the winners are those whose resource co-locates with "
          "pumped-storage terrain (islands and sierras); flat sites fall back on dearer "
-         "H₂ firming. Details in the Geography chapter."),
+         "H₂ firming." + scan_note + " Details in the Geography chapter."),
         ("AI datacenters don't just ride the learning curve — they pull it.",
          "Every doubling of cumulative deployment cuts battery system cost ~19% and solar "
          "~25% (Wright's Law), and GW-scale datacenter procurement lands on exactly the "
@@ -505,18 +515,25 @@ def scan_section():
     mi, yrs = d["milestone"], d["weather_years"]
     cells = d["cells"]
     sur = d["surrogate"]
-    ranked = sorted(cells, key=lambda c: c["lcoe"])
     n = len(cells)
-    # top-10 cheapest cells table
+    eu_cells = [c for c in cells if c["lat"] >= 35]     # the 34°N row is the Maghreb coast
+    ranked = sorted(eu_cells, key=lambda c: c["lcoe"])
+    land = sorted((c for c in eu_cells if c["lsm"] >= 0.6), key=lambda c: c["lcoe"])
+
+    def _cellname(c):
+        return (f"{abs(c['lat']):.0f}°{'N' if c['lat'] >= 0 else 'S'}, "
+                f"{abs(c['lon']):.0f}°{'E' if c['lon'] >= 0 else 'W'}")
+
     def _row(c):
-        return (f"<tr><th>{abs(c['lat']):.0f}°{'N' if c['lat'] >= 0 else 'S'}, "
-                f"{abs(c['lon']):.0f}°{'E' if c['lon'] >= 0 else 'W'}</th>"
+        return (f"<tr><th>{_cellname(c)}</th>"
                 f"<td>{c['cf_solar']:.2f}</td><td>{c['cf_wind']:.2f}</td>"
-                f"<td>{c['worst14']:.2f}</td><td class='cx'>${c['lcoe']:.0f}</td></tr>")
+                f"<td>{c['worst14']:.2f}</td><td>{c['lsm']:.0%}</td>"
+                f"<td class='cx'>${c['lcoe']:.0f}</td></tr>")
     top = "".join(_row(c) for c in ranked[:10])
+    land_txt = ", ".join(f"{_cellname(c)} (${c['lcoe']:.0f})" for c in land[:4])
     r2c, r2f = sur["cf_only"]["r2"], sur["full"]["r2"]
     maec, maef = sur["cf_only"]["mae"], sur["full"]["mae"]
-    med = ranked[n // 2]["lcoe"]
+    med = sorted(c["lcoe"] for c in cells)[n // 2]
     return (
         '<h2>Scanning the whole continent</h2>'
         f'<p>The nine sun+wind candidates above were chosen by hand. To remove the '
@@ -526,6 +543,18 @@ def scan_section():
         f'wind costs re-anchored to its real capacity factors. EU technology costs are '
         f'used everywhere, so the map isolates <b>geography</b>: resource quality and '
         f'weather structure, not national policy. Median cell: ~${med:.0f}/MWh at {mi}.</p>'
+        f'<p><b>The scan\'s surprise: for a build-it-yourself system, Europe\'s cheapest '
+        f'geography is its windy northern edge, not its sunny south.</b> The best cells '
+        f'(~${ranked[0]["lcoe"]:.0f}–{ranked[9]["lcoe"]:.0f}/MWh) trace the North Sea and '
+        f'Baltic coasts and islands — Danish and Pomeranian shores, the Estonian and '
+        f'Swedish Baltic islands, Orkney and the Faroes — where a ~0.5 wind capacity '
+        f'factor out-earns Mediterranean sun. Most of those cells are part sea (see the '
+        f'land-fraction column): their wind is effectively <i>coastal/near-offshore</i> '
+        f'grade. The cheapest <b>mostly-land</b> cells ({land_txt}) tell the same story '
+        f'one notch dearer. The expensive interior band — and the very worst cells, the '
+        f'sheltered Scandinavian inland valleys (~${max(c["lcoe"] for c in eu_cells):.0f})'
+        f' — is what a datacenter pays for being far from wind. Firm hydro (~$46) still '
+        f'beats every cell on the map.</p>'
         + _fig_box(map_fig, "map of 24/7 carbon-free power cost across Europe")
         + '<h3>Can two capacity factors predict the price?</h3>'
         f'<p>Almost — and the gap is the interesting part. A transparent least-squares '
@@ -541,16 +570,23 @@ def scan_section():
         + _fig_box(sur_fig, "surrogate validation scatter and coefficients")
         + '<h3>The cheapest cells found by the scan</h3>'
         + "<table><thead><tr><th>Cell</th><th>Solar CF</th><th>Wind CF</th>"
-          "<th>Worst 14-day depth</th><th>$/MWh " + str(mi) + "</th></tr></thead>"
+          "<th>Worst 14-day depth</th><th>Land fraction</th>"
+          "<th>$/MWh " + str(mi) + "</th></tr></thead>"
           f"<tbody>{top}</tbody></table>"
         '<div class="caveat">Screening fidelity: one milestone year, reduced optimizer '
         'starts, 3 weather years, ~1° cells (which average away local wind jets — the '
-        'curated point sites above are the precision layer). The scan covers only the '
-        'build-it-yourself sun+wind strategy; firm hydro and geothermal (the overall '
-        'winners) are plant-specific and stay as the marked point sites. Before treating '
-        'a cell as a real candidate, re-score its exact coordinates '
-        '(<code>tools/fetch_era5.py</code> + <code>--site</code>) and check local '
-        'constraints — including protected areas.</div>')
+        'curated point sites above are the precision layer). Cells with a low land '
+        'fraction average sea wind into their capacity factor, so treat them as '
+        '<b>coastal/offshore-wind zones</b>, not plug-in onshore sites. The scan covers '
+        'only the build-it-yourself sun+wind strategy; firm hydro and geothermal (the '
+        'overall winners) are plant-specific and stay as the marked point sites. And a '
+        'cheap cell is not a permit: several winners overlap sensitive areas (the Wadden '
+        'Sea coast is a protected World Heritage sea; Orkney and the Baltic islands '
+        'carry major bird and marine designations) — before treating a cell as a real '
+        'candidate, re-score its exact coordinates (<code>tools/fetch_era5.py</code> + '
+        '<code>--site</code>) and check Natura 2000 / national constraints. The box\'s '
+        'southern edge also shows the <i>Maghreb</i> coast as cheap (~$111–120) — real, '
+        'but outside the EU siting question.</div>')
 
 
 # ── zero-carbon page sections ───────────────────────────────────────────────────────
