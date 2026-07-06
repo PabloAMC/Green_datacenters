@@ -21,6 +21,7 @@ from .reporting import print_summary, export_results, git_commit, config_hash
 from .plots import (plot_cost_trajectories, plot_reliability_sensitivity,
                     plot_optimal_mix, plot_component_breakdown, plot_h2_breakdown)
 from .h2system import h2_system_trajectory
+from .weather import load_weather_traces
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -75,6 +76,26 @@ def run_simulation(
     cum_win  = cumulative_capacity(wind,    years)
     cum_batt = cumulative_capacity(battery, years)
 
+    # Build the dispatch simulator up front so its (possibly real) capacity factor is
+    # known before the LCOE trajectories are levelised.
+    sim      = ChronologicalSimulator(sys, battery, workload, mean_irr, mean_wind_ms, seed,
+                                      weather_years=weather_years)
+    # REAL-WEATHER RE-LEVELING (v6.0). When the dispatch is driven by measured ERA5/NSRDB
+    # traces (`weather_years`), the simulated CF is the *real* site CF, which generally
+    # differs from the synthetic CF the imported Lazard LCOEs are levelised at. A panel /
+    # turbine costs the same $/kW wherever it sits, so holding that capital fixed we
+    # re-express each technology's LCOE at the real CF:
+    #     lcoe_real = lcoe_today · CF_ref / CF_real
+    # CF_ref = the synthetic CF for this region's resource (the Lazard-anchored cost basis);
+    # CF_real = the mean CF of the supplied weather years. This preserves the v5.5
+    # CF-consistency invariant — cost and energy refer to the same plant — at the real
+    # site, and propagates through every downstream consumer (the RE-target lines, the
+    # gas-free H₂ line, the cost-MC band) because they all derive from `solar`/`wind`.
+    if weather_years is not None:
+        ref = ChronologicalSimulator(sys, battery, workload, mean_irr, mean_wind_ms, seed)
+        solar = replace(solar, lcoe_today=solar.lcoe_today * ref.sol_cf_mean / sim.sol_cf_mean)
+        wind  = replace(wind,  lcoe_today=wind.lcoe_today  * ref.win_cf_mean / sim.win_cf_mean)
+
     lcoe_solar     = wright_law(solar.lcoe_today,        solar.cumulative_gw_2025,    cum_sol,  solar.learning_rate)
     lcoe_wind      = wright_law(wind.lcoe_today,         wind.cumulative_gw_2025,     cum_win,  wind.learning_rate)
     # Per-tech WACC (v5.3): re-express the bundled generation LCOE at each
@@ -96,8 +117,6 @@ def run_simulation(
         gas_s = replace(gas, gas_price_mmbtu=gas.gas_price_mmbtu * gas_stress_mult)
         gas_stress = np.array([gas_pure_lcoe(gas_s, i, gas_s.wacc) for i in range(years + 1)])
 
-    sim      = ChronologicalSimulator(sys, battery, workload, mean_irr, mean_wind_ms, seed,
-                                      weather_years=weather_years)
     rng_cost = np.random.default_rng(seed + 1)
 
     results = {
@@ -117,7 +136,8 @@ def run_simulation(
                 gas.carbon_price_ceiling, gas.carbon_trajectory, gas.wacc],
         "resource": [mean_irr, mean_wind_ms],
         "weather": [sys.wind_solar_corr, sys.syn_loading, sys.syn_persistence,
-                    sys.n_sites, sys.site_synoptic_corr],
+                    sys.n_sites, sys.site_synoptic_corr,
+                    getattr(sys, "site_local_corr", 0.4)],
         "grid": [sys.grid_steps, sys.n_mc_weather, sys.c_sol_max, sys.c_win_max,
                  sys.storage_hours_max],
         "seed": seed, "years": years, "workload": workload.name,
@@ -174,10 +194,17 @@ def run_simulation(
             bat_cx[i] = split["batt_capex"]; bat_om[i] = split["batt_om"]
             gas_cx[i] = split["gas_capex"]; gas_op[i] = split["gas_opex"]
             gas_cb[i] = split["gas_carbon"]
-            # Achieved renewable fraction at the optimum (firm, no shed: 1 − gas energy
-            # fraction). Lets callers detect when a high RE target was infeasible at a
-            # poor-resource site (the returned build is then the penalty optimum, < target).
-            opt_re[i] = 1.0 - sim.interp3(sim.gas_mean, opt_csol[i], opt_cwin[i], opt_B[i])
+            # Achieved renewable fraction at the optimum, on the FIRM convention:
+            # gas serves the would-be-shed energy too (gas + drop), matching the
+            # constraint's firm branch. Exact for the firm default and for
+            # firm-collapsing premium workloads; for genuinely shed-economic cheap
+            # workloads it understates served-RE (conservative). Pre-v5.8 the drop
+            # term was omitted, overstating RE for interruptible workloads. Lets
+            # callers detect when a high RE target was infeasible at a poor-resource
+            # site (the returned build is then the penalty optimum, < target).
+            # v5.9: read off EXACT dispatch at the optimum (cached), not the surface.
+            _st = sim.exact_point(opt_csol[i], opt_cwin[i], opt_B[i])
+            opt_re[i] = 1.0 - (_st["gas_mean"] + _st["drop_mean"])
 
             # Cost uncertainty: hold optimal (C_sol, C_win, B) fixed from the
             # central solve; re-evaluate cost formula with lognormal-perturbed
@@ -186,7 +213,7 @@ def run_simulation(
             # O(n_mc × n_starts × 500 iterations) = prohibitive.
             C_sol_opt = opt_csol[i]; C_win_opt = opt_cwin[i]; B_opt = opt_B[i]
             r   = battery.wacc; n_lf = sys.project_lifetime_yr   # battery MC uses battery WACC
-            eff_fec_opt = sim.interp3(sim.fec_mean, C_sol_opt, C_win_opt, B_opt)
+            eff_fec_opt = _st["fec_mean"]   # exact at the optimum (v5.9, cached)
             # Gas + shed-penalty cost are independent of the perturbed (solar/wind/
             # battery) capex, so hold them fixed at the optimiser's values.
             c_gas_pen_opt = opt_cb[i] + opt_cp[i]
@@ -256,7 +283,8 @@ def run_simulation(
     # the fig1 H₂ line and the fig6 breakdown.
     if h2_system:
         results["h2_system"] = h2_system_trajectory(
-            solar, wind, battery, mean_irr, mean_wind_ms, sys, years, seed=seed)
+            solar, wind, battery, mean_irr, mean_wind_ms, sys, years, seed=seed,
+            weather_years=weather_years)
 
     # Geographic / siting band: re-solve each trajectory (every RE target + the H₂ system)
     # at a poor and a good site for the region, and store the min–max envelope. This is the
@@ -408,13 +436,29 @@ def run_full_suite():
     # the maximum achievable RE is ≈0.94 (EU) / ≈0.95 (US). Pushing past ~94% requires
     # long-duration storage or H₂ firming — see the --ldes / --firming h2 overlays (fig6).
     reliabilities = [0.70, 0.80, 0.85, 0.90]
+    # HEADLINE WEATHER (v6.0). The firm suite is driven by MEASURED ERA5 reanalysis at a
+    # single representative data-center market per region — US: ERCOT Texas, EU: France —
+    # rather than the synthetic generator. One real site (no spurious geographic smoothing
+    # a single datacenter does not get), with its actual hourly cloud / Dunkelflaute / sun↔
+    # wind structure and real interannual spread. The imported Lazard LCOEs are re-levelled
+    # from their synthetic reference CF to each site's real CF inside run_simulation, so the
+    # cost basis stays consistent (§4 CF-invariant). Override with --weather, or drop the
+    # weather_years below to fall back to the synthetic headline. The synthetic generator
+    # still backs every sensitivity/siting analysis (resource band, tornado, --resource …),
+    # which need the resource as a free knob; the resource band is auto-skipped here since
+    # the real-weather resource is fixed (one site).
+    HEADLINE_WEATHER = {"us": "output/era5/texas.npz", "eu": "output/era5/france.npz"}
+    us_weather = load_weather_traces(HEADLINE_WEATHER["us"])
+    eu_weather = load_weather_traces(HEADLINE_WEATHER["eu"])
     # gas_stress_mult=1.6: a transparency reference line showing the gas baseline at a
     # 60%-higher fuel price (e.g. AI-demand-driven tightening) — the headline holds gas
     # fuel flat, so this makes the "cheap-gas moat" assumption visible (§7 / §12).
     run_region_key("us", FIRM, reliabilities, prefix="us_firm", seed=42,
-                   h2_system=True, resource_band=True, gas_stress_mult=1.6)
+                   h2_system=True, resource_band=True, gas_stress_mult=1.6,
+                   weather_years=us_weather)
     run_region_key("eu", FIRM, reliabilities, prefix="eu_firm", seed=42,
-                   h2_system=True, resource_band=True, gas_stress_mult=1.6)
+                   h2_system=True, resource_band=True, gas_stress_mult=1.6,
+                   weather_years=eu_weather)
     print("\nDone — figures saved in figs/")
 
 

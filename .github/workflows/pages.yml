@@ -1,6 +1,6 @@
 name: Pages
 
-# Build the project site (docs/index.html) from the committed results + figures and
+# Build the project site (docs/*.html) from the committed results + figures and
 # publish it to GitHub Pages. One-time setup: repo Settings → Pages → Source = "GitHub
 # Actions" (this workflow then keeps the site in sync on every push to main).
 

@@ -16,6 +16,14 @@ from .dispatch import ChronologicalSimulator
 # 7. 3D NELDER-MEAD OPTIMISER
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Absolute served-RE feasibility tolerance. v5.9: tightened 0.005 → 0.002 — at the
+# steepest observed RE shadow price (~$1,000/MWh per unit fraction, EU 90% 2025) the
+# old 0.5% admitted up to ~$5/MWh of one-sided cost understatement; 0.2% caps that
+# at ~$2. Safe to tighten because the final optimum is now confirmed on EXACT
+# dispatch (whose RE is ≥ the interpolated value — the trilinear bias is one-sided).
+RE_TOL = 0.002
+
+
 def _warn_if_binding(value: float, vmax: float, name: str, grid_steps: int,
                      r_target: float, year_index: int) -> None:
     """Warn if an optimum lands within one grid-step of its max bound (cap binding)."""
@@ -59,7 +67,6 @@ def optimal_cost_3d(
     Returns (total, c_gen, c_stor, c_gas, c_pen, C_sol*, C_win*, B*, f_drop*).
     """
     n         = sys.project_lifetime_yr
-    surface   = sim.gas_p90 if use_p90 else sim.gas_mean
     penalty_w = 2000.0   # $/MWh per unit RE shortfall (quadratic below)
     shed_val  = sim.workload.shed_penalty_mwh
 
@@ -72,20 +79,41 @@ def optimal_cost_3d(
                + carbon_price(gas, year_index) * gas.carbon_intensity_ccgt)
     shed_is_economic = shed_val < gas_var
 
-    def evaluate(C_sol, C_win, B):
-        """Cost components and served-RE fraction at a point (no constraint penalty)."""
-        f_gas_shed = sim.interp3(surface, C_sol, C_win, B)
-        f_drop_max = sim.interp3(sim.drop_mean, C_sol, C_win, B)
-        fec        = sim.interp3(sim.fec_mean, C_sol, C_win, B)
+    def evaluate(C_sol, C_win, B, stats=None):
+        """Cost components and served-RE fraction at a point (no constraint penalty).
+
+        `stats` (v5.9): optional EXACT dispatch statistics from `sim.exact_point` —
+        used for the final reported optimum so the headline numbers come from true
+        dispatch, not the trilinear surface. None → interpolated (fast; used for
+        all optimisation-loop evaluations)."""
+        # v5.9.1 P90 coherence: with use_p90 every quantity is the P90 of the SAME
+        # per-year statistic (drop_p90, gas_peak_p90, and gas_firm_p90 = P90 of the
+        # per-year gas+drop sum) — pre-v5.9.1 the gas energy was P90 but the firm
+        # add-back and the shed-branch capacity peak were means.
+        def _surf(name_mean, name_p90):
+            key = name_p90 if use_p90 else name_mean
+            return stats[key] if stats is not None else sim.interp3(
+                getattr(sim, key), C_sol, C_win, B)
+        fec = (stats["fec_mean"] if stats is not None
+               else sim.interp3(sim.fec_mean, C_sol, C_win, B))
         if shed_is_economic:
-            f_gas, f_drop = f_gas_shed, f_drop_max
-            f_peak = sim.interp3(sim.gas_peak_mean, C_sol, C_win, B)
+            f_gas   = _surf("gas_mean", "gas_p90")
+            f_drop  = _surf("drop_mean", "drop_p90")
+            f_peak  = _surf("gas_peak_mean", "gas_peak_p90")
         else:   # firm: gas serves the would-be-shed energy too; size to firm peak
-            f_gas, f_drop = f_gas_shed + f_drop_max, 0.0
-            firm_surface = (sim.gas_peak_firm_p90
-                            if getattr(sys, "firm_gas_sizing", "mean") == "p90"
-                            else sim.gas_peak_firm_mean)
-            f_peak = sim.interp3(firm_surface, C_sol, C_win, B)
+            f_gas, f_drop = _surf("gas_mean", "gas_firm_p90"), 0.0
+            if not use_p90:   # mean path: firm gas energy = gas + would-be-shed
+                f_gas = f_gas + (stats["drop_mean"] if stats is not None
+                                 else sim.interp3(sim.drop_mean, C_sol, C_win, B))
+            use_firm_p90 = (use_p90
+                            or getattr(sys, "firm_gas_sizing", "mean") == "p90")
+            if stats is not None:
+                f_peak = stats["gas_peak_firm_p90" if use_firm_p90
+                               else "gas_peak_firm_mean"]
+            else:
+                firm_surface = (sim.gas_peak_firm_p90 if use_firm_p90
+                                else sim.gas_peak_firm_mean)
+                f_peak = sim.interp3(firm_surface, C_sol, C_win, B)
         served = max(1.0 - f_drop, 1e-6)
         f_re_served = 1.0 - f_gas / served
         c_gen  = C_sol * sim.sol_cf_mean * lcoe_sol + C_win * sim.win_cf_mean * lcoe_win
@@ -142,13 +170,13 @@ def optimal_cost_3d(
     # plateau), do a targeted 1D scan over B at the optimal (C_sol, C_win) to find
     # the minimum-cost feasible storage.
     _, _, _, _, f_re_check, _ = evaluate(C_sol, C_win, B)
-    if f_re_check < r_target - 0.005:  # 0.5% tolerance
+    if f_re_check < r_target - RE_TOL:  # feasibility tolerance (v5.9: 0.2%)
         B_candidates = np.linspace(0.0, sys.storage_hours_max, 150)
         best_feasible_cost = np.inf
         best_B_feas = B
         for B_cand in B_candidates:
             cg, cs_, cgz, cp, f_re_c, _ = evaluate(C_sol, C_win, float(B_cand))
-            if f_re_c >= r_target - 0.005:
+            if f_re_c >= r_target - RE_TOL:
                 c_total = cg + cs_ + cgz + cp
                 if c_total < best_feasible_cost:
                     best_feasible_cost = c_total
@@ -179,7 +207,7 @@ def optimal_cost_3d(
         prev_total = pc_gen + pc_stor + pc_gas + pc_pen
         cg0, cs0, cgz0, cp0, _, _ = evaluate(C_sol, C_win, B)
         cur_total = cg0 + cs0 + cgz0 + cp0
-        if p_re >= r_target - 0.005 and prev_total <= cur_total * (1.0 + cont_tol):
+        if p_re >= r_target - RE_TOL and prev_total <= cur_total * (1.0 + cont_tol):
             # Diagnostic (opt-in): record that the continuity tie-break fired and the
             # cost change it introduced (prev−cur; ≤ cont_tol·cur, i.e. ≤1%), so the
             # bound stays visible and can't silently drift. Pure observation; no effect.
@@ -195,7 +223,14 @@ def optimal_cost_3d(
     _warn_if_binding(C_win, sys.c_win_max, "C_win", sys.grid_steps, r_target, year_index)
     _warn_if_binding(B,     sys.storage_hours_max, "B", sys.grid_steps, r_target, year_index)
 
-    c_gen, c_stor, c_gas, c_pen, f_re_final, f_drop = evaluate(C_sol, C_win, B)
+    # EXACT confirmation (v5.9): re-evaluate the chosen build on true dispatch (no
+    # interpolation), so the reported cost/RE carry no trilinear convexity bias.
+    # Exact f_gas ≤ interpolated f_gas (the bias is one-sided), so this can only
+    # improve feasibility — the tolerance below stays safe.
+    exact_stats = (sim.exact_point(C_sol, C_win, B)
+                   if hasattr(sim, "exact_point") else None)
+    c_gen, c_stor, c_gas, c_pen, f_re_final, f_drop = evaluate(C_sol, C_win, B,
+                                                               stats=exact_stats)
     # Infeasibility guard: a firm, battery-only system cannot exceed ≈0.94 RE (EU) /
     # ≈0.95 (US) — multi-day Dunkelflaute plus the min(1,4/B) battery power cap leave a
     # residual gas slice no build within bounds can close. If the target can't be met,
@@ -203,7 +238,7 @@ def optimal_cost_3d(
     # feasible R-meeting build, and its cost understates a true R build. Warn loudly so
     # the number is not mistaken for a feasible optimum (the firm suite omits 95% for this
     # reason; >~94% needs LDES / H₂ firming — see --ldes / --firming h2).
-    if f_re_final < r_target - 0.005:
+    if f_re_final < r_target - RE_TOL:
         print(f"  [WARN] RE target {r_target:.0%} INFEASIBLE at {2025+year_index}: "
               f"max achievable ≈ {f_re_final:.1%} (firm battery-only ceiling). Reported "
               f"cost is for the {f_re_final:.0%}-RE penalty optimum, not a {r_target:.0%} build "
@@ -229,21 +264,31 @@ def delivered_cost_split(sim, C_sol, C_win, B, solar, wind, lcoe_sol, lcoe_win,
       shed                       value of lost compute (interruptible only)
     """
     n = sys.project_lifetime_yr
-    f_gas_shed = sim.interp3(sim.gas_mean, C_sol, C_win, B)
-    f_drop_max = sim.interp3(sim.drop_mean, C_sol, C_win, B)
-    fec        = sim.interp3(sim.fec_mean, C_sol, C_win, B)
+    # Exact dispatch stats at the build (v5.9) so the breakdown sums to the same
+    # exact total the optimiser reports; interpolation only as a fallback.
+    st = sim.exact_point(C_sol, C_win, B) if hasattr(sim, "exact_point") else None
+    if st is not None:
+        f_gas_shed, f_drop_max, fec = st["gas_mean"], st["drop_mean"], st["fec_mean"]
+    else:
+        f_gas_shed = sim.interp3(sim.gas_mean, C_sol, C_win, B)
+        f_drop_max = sim.interp3(sim.drop_mean, C_sol, C_win, B)
+        fec        = sim.interp3(sim.fec_mean, C_sol, C_win, B)
     shed_val   = sim.workload.shed_penalty_mwh
     gas_var = (gas.gas_price_mmbtu * gas.ccgt_heat_rate + gas.vom_mwh
                + carbon_price(gas, year_index) * gas.carbon_intensity_ccgt)
     if shed_val < gas_var:   # shedding is economic
         f_gas, f_drop = f_gas_shed, f_drop_max
-        f_peak = sim.interp3(sim.gas_peak_mean, C_sol, C_win, B)
+        f_peak = (st["gas_peak_mean"] if st is not None
+                  else sim.interp3(sim.gas_peak_mean, C_sol, C_win, B))
     else:                    # firm: gas serves all; size to firm peak
         f_gas, f_drop = f_gas_shed + f_drop_max, 0.0
-        firm_surface = (sim.gas_peak_firm_p90
-                        if getattr(sys, "firm_gas_sizing", "mean") == "p90"
-                        else sim.gas_peak_firm_mean)
-        f_peak = sim.interp3(firm_surface, C_sol, C_win, B)
+        use_firm_p90 = getattr(sys, "firm_gas_sizing", "mean") == "p90"
+        if st is not None:
+            f_peak = st["gas_peak_firm_p90" if use_firm_p90 else "gas_peak_firm_mean"]
+        else:
+            firm_surface = (sim.gas_peak_firm_p90 if use_firm_p90
+                            else sim.gas_peak_firm_mean)
+            f_peak = sim.interp3(firm_surface, C_sol, C_win, B)
 
     gen_s = C_sol * sim.sol_cf_mean * lcoe_sol
     gen_w = C_win * sim.win_cf_mean * lcoe_win

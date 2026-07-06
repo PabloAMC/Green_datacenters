@@ -24,3 +24,9 @@ env/
 # canonical us_firm / eu_firm suite tracked)
 figs/cli_*
 output/cli_*
+
+# Bulk gridded ERA5 for the Europe scan — refetchable (tools/fetch_era5_grid.py), too
+# large for git (the converted .npz alone exceeds GitHub's 100 MB file limit).
+output/era5_grid/
+output/era5_grid_fetch.log
+output/eu_scan_run.log

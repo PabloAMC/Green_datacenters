@@ -41,10 +41,11 @@ def test_wrights_law_solar_trajectory():
     # v5.7: deployment additions grow with a *decaying* rate (S-curve), so cumulative
     # solar lands ~15.6 TW by 2040 (not the old constant-growth 38 TW) and the learning-
     # curve LCOE decline is correspondingly less aggressive at the long end.
+    # v5.8: solar LR 0.30 → 0.25 (defensible central of module/system learning estimates).
     cum = m.cumulative_capacity(m.SOLAR, 15)
     lcoe = m.wright_law(m.SOLAR.lcoe_today, m.SOLAR.cumulative_gw_2025, cum,
                         m.SOLAR.learning_rate)
-    for yr, exp in {0: 52.0, 3: 39.0, 5: 33.9, 10: 26.2, 15: 21.9}.items():
+    for yr, exp in {0: 52.0, 3: 41.2, 5: 36.8, 10: 29.9, 15: 25.9}.items():
         assert abs(lcoe[yr] - exp) < 0.1, f"solar LCOE {2025+yr}: {lcoe[yr]} != {exp}"
     # cumulative stays well below the old implausible constant-growth path
     assert 14_000 < cum[15] < 17_000, f"2040 cumulative solar {cum[15]:.0f} GW off target"
@@ -83,12 +84,13 @@ def test_carbon_trajectory_modes():
 
 
 def test_gas_pure_lcoe():
-    # At the model default gas WACC (9%, v5.3 per-tech financing)
-    assert abs(m.gas_pure_lcoe(m.GAS, 0, m.GAS.wacc) - 46.05) < 0.1
-    assert abs(m.gas_pure_lcoe(m.GAS_EU, 0, m.GAS_EU.wacc) - 113.75) < 0.2
-    assert abs(m.gas_pure_lcoe(m.GAS_EU, 10, m.GAS_EU.wacc) - 148.29) < 0.2
-    # At the legacy flat 7% it recovers the old reference (capex term only changes)
-    assert abs(m.gas_pure_lcoe(m.GAS, 0, 0.07) - 43.7) < 0.1
+    # At the model default gas WACC (9%, v5.3 per-tech financing; v5.8 capex
+    # recalibration: CCGT $2,000/kW order-book, carbon intensity combustion-only)
+    assert abs(m.gas_pure_lcoe(m.GAS, 0, m.GAS.wacc) - 58.36) < 0.1
+    assert abs(m.gas_pure_lcoe(m.GAS_EU, 0, m.GAS_EU.wacc) - 121.51) < 0.2
+    assert abs(m.gas_pure_lcoe(m.GAS_EU, 10, m.GAS_EU.wacc) - 150.57) < 0.2
+    # At a flat 7% only the capex term changes
+    assert abs(m.gas_pure_lcoe(m.GAS, 0, 0.07) - 54.06) < 0.1
 
 
 def test_h2_dispatch_vec_monotone():
@@ -292,21 +294,25 @@ def test_per_tech_wacc_defaults_and_direction():
 def test_rewacc_identity_and_monotonicity():
     import numpy as np
     base = np.array([52.0, 30.0, 13.7])
-    # identity at the legacy WACC
+    # identity at the legacy WACC — which (v5.8 real-terms convention) the default
+    # solar/wind WACC equals, so the headline RE LCOEs pass through unchanged
     ident = m.TechParams("t", 52.0, 0.3, 1, 1, 0.1, om_frac_lcoe=0.15,
                          wacc=m.LEGACY_WACC, life_yr=30)
     assert np.allclose(m.rewacc_lcoe(base, ident), base)
+    assert m.SOLAR.wacc == m.LEGACY_WACC
+    assert np.allclose(m.rewacc_lcoe(base, m.SOLAR), base)
     # cheaper capital strictly lowers the LCOE; the multiplier is constant across years
-    adj = m.rewacc_lcoe(base, m.SOLAR)
+    cheap = m.replace(m.SOLAR, wacc=0.045)
+    adj = m.rewacc_lcoe(base, cheap)
     assert all(adj < base)
     assert np.allclose(adj / base, (adj / base)[0])   # same factor every year
 
 
 def test_battery_delivered_cost():
-    # v5.4 augmentation model (US, 7% WACC, 0.5 EFC/day)
-    doc = {2: 7.4, 4: 13.1, 8: 23.6, 12: 34.7, 24: 68.6}
+    # v5.4 augmentation model (US, 7% WACC, 0.5 EFC/day; v5.8 capex basis 90/160)
+    doc = {2: 4.8, 4: 7.7, 8: 12.4, 12: 17.7, 24: 34.5}
     for h, exp in doc.items():
-        ann = m.battery_annualised_cost(m.BATTERY_US, h, 180.0, 140.0, 0.07, 20, 0.5)
+        ann = m.battery_annualised_cost(m.BATTERY_US, h, 90.0, 160.0, 0.07, 20, 0.5)
         assert abs(ann / 8760.0 - exp) < 0.1, f"battery {h}h: {ann/8760:.2f} != {exp}"
 
 
@@ -419,6 +425,98 @@ def test_cf_marginals_preserved_under_synoptic():
     s_on,  w_on  = mean_cf(0.5, 123)
     assert abs(s_on - s_off) < 0.01, f"solar CF moved: {s_off:.3f}->{s_on:.3f}"
     assert abs(w_on - w_off) < 0.015, f"wind CF moved: {w_off:.3f}->{w_on:.3f}"
+
+
+def test_realized_wind_solar_corr_matches_configured():
+    """v5.9 invariant: moving cloud persistence into z-space restores the realized
+    daily wind-solar correlation to ≈ the configured ρ (pre-v5.9 it was ~half, and
+    positively biased: EU -0.35 realized ≈ -0.18, US 0 realized ≈ +0.07). A modest
+    attenuation through the monotone Beta/power-curve transforms is inherent."""
+    import numpy as np
+    from lcoe.weather import solar_clearsky, generate_weather_year
+    cs = solar_clearsky(3.8); rng = np.random.default_rng(7)
+    cs_d = cs.reshape(365, 24).sum(1)
+    corrs = []
+    for _ in range(120):
+        s, w = generate_weather_year(cs, 7.0, rng, -0.35, 0.5, 0.85)
+        xi = s.reshape(365, 24).sum(1) / np.maximum(cs_d, 1e-9)
+        corrs.append(np.corrcoef(xi, w.reshape(365, 24).mean(1))[0, 1])
+    r_eu = float(np.mean(corrs))
+    assert -0.35 <= r_eu <= -0.24, f"EU realized corr {r_eu:.3f} vs configured -0.35"
+    cs_us = solar_clearsky(5.5); corrs = []
+    for _ in range(120):
+        s, w = generate_weather_year(cs_us, 7.5, rng, 0.0, 0.5, 0.82)
+        xi = s.reshape(365, 24).sum(1) / np.maximum(cs_us.reshape(365, 24).sum(1), 1e-9)
+        corrs.append(np.corrcoef(xi, w.reshape(365, 24).mean(1))[0, 1])
+    r_us = float(np.mean(corrs))
+    assert abs(r_us) < 0.04, f"US realized corr {r_us:.3f} vs configured 0.0"
+
+
+def test_cloud_marginal_preserved():
+    """v5.9 invariant: the Beta(3,1.5) cloud marginal holds EXACTLY (persistence in
+    z-space, no post-transform filtering) — deep-overcast days occur at the Beta
+    frequency (pre-v5.9 the Beta-space filter shrank it ~4×: 1.3% vs 5.2%)."""
+    import numpy as np
+    from scipy.stats import beta as _beta
+    from lcoe.weather import solar_clearsky, generate_weather_year
+    cs = solar_clearsky(5.5); rng = np.random.default_rng(13)
+    cs_d = cs.reshape(365, 24).sum(1)
+    p = []
+    for _ in range(200):
+        s, _w = generate_weather_year(cs, 7.5, rng, 0.0, 0.5, 0.82)
+        xi = s.reshape(365, 24).sum(1) / np.maximum(cs_d, 1e-9)
+        p.append((xi < 0.3).mean())
+    target = _beta.cdf(0.3, 3, 1.5)
+    assert abs(np.mean(p) - target) < 0.006, f"P(xi<0.3) {np.mean(p):.3%} != {target:.3%}"
+
+
+def test_mean_solar_cf_anchor_exact():
+    """v5.9 invariant: the clear-sky renormalisation iterates to tolerance, so the
+    effective solar CF lands on mean_irr/24 even where summer-noon clipping binds
+    (US-type sites; pre-v5.9 it converged ~1% short)."""
+    import numpy as np
+    from lcoe.weather import solar_clearsky, generate_weather_year
+    for irr, wind_ms in ((5.5, 7.5), (3.8, 7.0)):
+        cs = solar_clearsky(irr); rng = np.random.default_rng(3)
+        cf = np.mean([generate_weather_year(cs, wind_ms, rng, 0.0, 0.5, 0.82)[0].mean()
+                      for _ in range(150)])
+        assert abs(cf / (irr / 24.0) - 1.0) < 0.005, f"CF {cf:.4f} vs {irr/24:.4f}"
+
+
+def test_p90_surfaces_coherent():
+    """v5.9.1: the P90 design path uses coherent per-year percentiles — drop_p90,
+    gas_peak_p90, and gas_firm_p90 (P90 of the per-year gas+drop SUM, not
+    P90(gas)+mean(drop)) — and each P90 statistic dominates its mean."""
+    import numpy as np
+    sim = _tiny_sim()
+    pt = (6.0, 6.0, 20.0)
+    st = sim.exact_point(*pt)
+    assert st["gas_p90"] >= st["gas_mean"] - 1e-12
+    assert st["drop_p90"] >= st["drop_mean"] - 1e-12
+    assert st["gas_peak_p90"] >= st["gas_peak_mean"] - 1e-12
+    # coherent firm P90: percentile of the sum, bounded by the sum of percentiles
+    assert st["gas_firm_p90"] >= st["gas_mean"] + st["drop_mean"] - 1e-12
+    assert st["gas_firm_p90"] <= st["gas_p90"] + st["drop_p90"] + 1e-12
+    # surfaces exist and match exact at a grid node
+    assert abs(st["gas_firm_p90"] - sim.interp3(sim.gas_firm_p90, *pt)) < 1e-12
+    assert abs(st["drop_p90"] - sim.interp3(sim.drop_p90, *pt)) < 1e-12
+
+
+def test_exact_point_matches_surface_at_grid_node():
+    """v5.9: `exact_point` re-dispatches the stored weather; at a grid node it must
+    reproduce the precomputed surface values exactly (same waterfall, same traces)."""
+    import numpy as np
+    sim = _tiny_sim()
+    # (6.0, 6.0, 20.0) is a node of the 4-step grid (0,6,12,18 × 0,6,12,18 × 0,20,40,60)
+    pt = (6.0, 6.0, 20.0)
+    st = sim.exact_point(*pt)
+    assert abs(st["gas_mean"] - sim.interp3(sim.gas_mean, *pt)) < 1e-12
+    assert abs(st["drop_mean"] - sim.interp3(sim.drop_mean, *pt)) < 1e-12
+    assert abs(st["fec_mean"] - sim.interp3(sim.fec_mean, *pt)) < 1e-12
+    assert abs(st["gas_peak_firm_mean"] - sim.interp3(sim.gas_peak_firm_mean, *pt)) < 1e-12
+    # off-node: exact gas ≤ interpolated gas (one-sided trilinear convexity bias)
+    off = (3.0, 3.0, 10.0)
+    assert sim.exact_point(*off)["gas_mean"] <= sim.interp3(sim.gas_mean, *off) + 1e-9
 
 
 def test_wind_cf_in_expected_band():
@@ -723,6 +821,10 @@ def test_cooling_load_raises_firm_gas_peak():
                                       load_profile="cooling"))
     b = (6.0, 5.0, 6.0)
     assert cool.interp3(cool.gas_peak_firm_mean, *b) > base.interp3(base.gas_peak_firm_mean, *b)
+    # ... and the cost layer must honour a peak ABOVE average load (v5.8: the old
+    # clip at 1.0 silently voided the documented cooling-profile gas upsizing).
+    assert (m.gas_backup_cost_scalar(0.5, m.GAS, 0, 0.07, gas_peak=1.2)
+            > m.gas_backup_cost_scalar(0.5, m.GAS, 0, 0.07, gas_peak=1.0))
 
 
 def test_external_validation_published_bands():
@@ -732,10 +834,10 @@ def test_external_validation_published_bands():
             m.cumulative_capacity(m.SOLAR, 15), m.SOLAR.learning_rate), m.SOLAR)[0]
     win = m.rewacc_lcoe(m.wright_law(m.WIND.lcoe_today, m.WIND.cumulative_gw_2025,
             m.cumulative_capacity(m.WIND, 15), m.WIND.learning_rate), m.WIND)[0]
-    assert 29.0 <= sol <= 96.0, f"US solar 2025 ${sol:.1f} outside Lazard v18 band"
-    assert 27.0 <= win <= 75.0, f"US wind 2025 ${win:.1f} outside Lazard v18 band"
+    assert 38.0 <= sol <= 78.0, f"US solar 2025 ${sol:.1f} outside Lazard 2025 band"
+    assert 37.0 <= win <= 86.0, f"US wind 2025 ${win:.1f} outside Lazard 2025 band"
     gas = m.gas_pure_lcoe(m.GAS, 0, m.GAS.wacc)
-    assert 40.0 <= gas <= 110.0, f"US gas ${gas:.1f} outside EIA/Lazard CCGT band"
+    assert 40.0 <= gas <= 110.0, f"US gas ${gas:.1f} outside EIA/GridLab CCGT band"
     r = _quick_sim(5.5, 7.5, years=0, seed=42)
     assert 0.20 <= r["sim_cf"]["solar"] <= 0.30, r["sim_cf"]["solar"]   # Lazard solar CF
     assert 0.30 <= r["sim_cf"]["wind"] <= 0.55, r["sim_cf"]["wind"]     # Lazard wind CF

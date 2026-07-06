@@ -11,8 +11,8 @@ from scipy.optimize import minimize
 from .params import (REGIONS, RESOURCE_PRESETS, LDES_PRESETS, GAS_H2, FIRM,
                      WorkloadProfile, _sys_with)
 from .costs import (cumulative_capacity, wright_law, rewacc_lcoe, crf,
-                    h2_system_cost_split)
-from .weather import solar_clearsky, generate_weather_year
+                    h2_system_cost_split, ldes_annual_cost)
+from .weather import solar_clearsky, generate_weather_year, generate_weather_portfolio
 from .dispatch import dispatch_ldes_overlay, dispatch_h2_vec
 from .simulate import run_simulation
 
@@ -43,7 +43,7 @@ def run_flex_sensitivity(region_key="eu", re_target=0.90, target_year=2030,
     if interruptibles is None:
         interruptibles = [0.0, 0.2, 0.4, 0.7, 0.95]
     if shed_penalties is None:
-        # straddle the gas variable cost (~$120/MWh in EU 2030) where shedding
+        # straddle the gas variable cost (~$100/MWh in EU 2030) where shedding
         # switches on; above it, premium compute never sheds (→ firm).
         shed_penalties = [25.0, 75.0, 150.0, 300.0, 700.0]
     cfg = REGIONS[region_key]
@@ -286,8 +286,14 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
                syn_persistence=sys.syn_persistence, cloud_ar1=sys.cloud_ar1,
                wind_ar1=sys.wind_ar1, wind_daily_share=sys.wind_daily_share,
                wind_seasonal_amp=sys.wind_seasonal_amp, wind_v_ci=sys.wind_v_ci,
-               wind_v_rated=sys.wind_v_rated, wind_v_cutout=sys.wind_v_cutout)
-    clearsky = solar_clearsky(cfg["mean_irr"])
+               wind_v_rated=sys.wind_v_rated, wind_v_cutout=sys.wind_v_cutout,
+               # v5.9.1 portfolio seam (n_sites=1 default → exact single-site)
+               n_sites=sys.n_sites, site_synoptic_corr=sys.site_synoptic_corr,
+               site_local_corr=getattr(sys, "site_local_corr", 0.4))
+    # Pass the performance ratio so the overlay sees the same derated resource as
+    # the main path (pre-v5.8 it silently ran on the undecorated clear-sky).
+    clearsky = solar_clearsky(cfg["mean_irr"],
+                              getattr(sys, "solar_performance_ratio", 1.0))
     rng = np.random.default_rng(seed + 7)
 
     cand = [(0.0, 0.0)] + [(c, s) for c in charge_set for s in storage_set]
@@ -304,14 +310,18 @@ def run_ldes_overlay(region_key="eu", re_target=0.90, target_year=2035,
     annuity = (1.0 - (1.0 + ldes.wacc) ** (-life_l)) / ldes.wacc
 
     def cfg_cost(c, B, efc):
-        # turbine is always installed (firms the load); electrolyser + storage scale
-        # with the self-production design. Augmentation applies to the storage energy.
-        p_cap = (c * ch_capex + dis_pow * dis_capex) * 1e3      # electrolyser + turbine
-        e_cap = B * e_capex * 1e3                               # H2 storage
-        cost_one = p_cap + e_cap
-        deg = ldes.calendar_deg_per_yr + ldes.cycle_deg_per_fec * efc * 365
-        npv = cost_one + deg * e_cap * annuity
-        return (npv * crf_l + cost_one * ldes.om_frac_capex) / 8760.0
+        # Single source (v5.9.1): delegate to costs.ldes_annual_cost — this local
+        # re-implementation was the last duplicated cost formula after the v5.7
+        # h2_system_cost_split unification (the two agreed term-for-term). The
+        # B=0 candidate ("buy all H₂") still carries the power kit — the turbine
+        # is always installed to burn purchased H₂ — which ldes_annual_cost's
+        # no-store early-return would drop, so that edge keeps its explicit form.
+        if B <= 0:
+            p_cap = (c * ch_capex + dis_pow * dis_capex) * 1e3
+            return p_cap * (crf_l + ldes.om_frac_capex) / 8760.0
+        return ldes_annual_cost(ldes, B, e_capex, ch_capex, dis_capex,
+                                c, dis_pow, ldes.wacc, n,
+                                effective_fec_per_day=efc) / 8760.0
 
     rows = []
     for k, (c, s) in enumerate(cand):
@@ -395,9 +405,15 @@ def run_ldes_joint(region_key="eu", target_year=2035, ldes_tech="h2",
     # ── pre-generate fixed weather (Y, 8760) so the NM objective is smooth ───────
     rng = np.random.default_rng(seed)
     sols, wins = [], []
+    # v5.9.1: portfolio seam (n_sites=1 default reduces exactly to single-site),
+    # matching the main dispatch path's spatial-diversification handling.
     for _ in range(n_mc):
-        s, w = generate_weather_year(
-            solar_clearsky(cfg["mean_irr"]), cfg["mean_wind_ms"], rng,
+        s, w = generate_weather_portfolio(
+            solar_clearsky(cfg["mean_irr"],
+                           getattr(sysp, "solar_performance_ratio", 1.0)),
+            cfg["mean_wind_ms"], rng,
+            n_sites=sysp.n_sites, site_synoptic_corr=sysp.site_synoptic_corr,
+            site_local_corr=getattr(sysp, "site_local_corr", 0.4),
             wind_solar_corr=sysp.wind_solar_corr, syn_loading=sysp.syn_loading,
             syn_persistence=sysp.syn_persistence, cloud_ar1=sysp.cloud_ar1,
             wind_ar1=sysp.wind_ar1, wind_daily_share=sysp.wind_daily_share,

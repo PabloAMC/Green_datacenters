@@ -83,6 +83,83 @@ This model computes the least-cost combination of solar PV, onshore wind, batter
 
 *Most recent first. This is a changelog of what each model version changed and why; safe to skip on a first read — the methodology it refers to is documented in the sections below.*
 
+**v5.9 — weather-statistics and optimizer hardening (closes the v5.8 audit findings).**
+Implements the accuracy items the v5.8 full-machinery audit surfaced (§12), all empirically
+validated. (a) **Cloud persistence moved into z-space** (§4.2–4.3): the short-scale cloud
+AR(1) now lives in the *latent* normal (a stationary unit-variance residual chain) instead of
+being filtered after the Beta transform. This makes the Beta(3,1.5) cloud marginal hold
+**exactly** (deep-overcast days back to the intended 5.2% of days, from the ~1.3% the old
+filter left) and restores the realized daily wind–solar correlation to the configured ρ
+(EU −0.35 now realizes ≈−0.28 vs the old ≈−0.18; US 0 realizes ≈0.00 vs the old +0.07 bias —
+the residual EU gap is the inherent Pearson attenuation of monotone transforms). Net
+direction: EU gains back the calibrated wind-when-overcast complementarity (cheaper high-RE);
+solar-heavy builds face honestly more frequent 1-day droughts (dearer). (b) **Exact solar-CF
+anchor** (§4.1): the clear-sky renormalisation iterates to tolerance, so the effective CF
+equals mean_irr/24 even where summer-noon clipping binds (US was ~1% short). (c) **Mid-summer
+seam** (§4.6): the daily latent series are rolled 182 days so the AR-chain seam falls in early
+July — the winter Dunkelflaute season is one contiguous stretch and Dec→Jan lulls are no
+longer severed at the trace boundary. (d) **Multi-site local-weather sharing** (§4.7,
+`site_local_corr`, default 0.4): cross-site correlation now includes the local cloud/wind
+residuals, not just the synoptic factor (pre-v5.9 the effective cross-site daily correlation
+was only λ²·c ≈ 0.18, overstating diversification; 0 recovers the old behaviour).
+(e) **Exact-dispatch confirmation** (§2, §8.4): the final reported optimum (cost, RE fraction,
+breakdown, FEC) is re-evaluated on **true dispatch** over the stored weather years
+(`ChronologicalSimulator.exact_point`) — the trilinear surface is now used only *inside* the
+optimisation loop, so the one-sided convexity bias (≈$1–3/MWh between nodes) no longer touches
+reported numbers. (f) **RE-feasibility tolerance tightened 0.5% → 0.2%** (`RE_TOL`), capping
+the admissible one-sided cost understatement at ≈$2/MWh (safe because exact RE ≥ interpolated
+RE). All headline outputs regenerated; four new regression tests lock the invariants
+(realized-ρ, Beta marginal, CF anchor, exact-point ≡ surface at grid nodes).
+
+*v5.9.1 — the four residual audit items.* (g) **P90 coherence** (opt-in `use_p90` paths):
+the shed branch gains true P90 surfaces (`drop_p90`, `gas_peak_p90`), and the firm branch's
+P90 gas energy is now the percentile of the per-year **gas+drop sum** (`gas_firm_p90`) with
+P90 capacity sizing implied — pre-v5.9.1 the gas energy was P90 but the shed add-back and
+capacity peak were means. (h) The **fig1 H₂ optimiser multi-starts every year** (the two cold
+starts now run alongside the warm start, closing the unmonitored warm-start-drift gap).
+(i) `run_ldes_overlay`'s locally-duplicated LDES annualisation now **delegates to
+`costs.ldes_annual_cost`** (the last duplicated cost formula; the B=0 buy-all-H₂ candidate
+keeps its explicit power-only form since the turbine is installed regardless). (j) The
+**H₂/LDES analysis paths use the multi-site portfolio seam** (`n_sites=1` default reduces
+exactly to single-site), removing the last fidelity asymmetry vs the main dispatch path.
+
+**v5.8 — June-2026 input recalibration (gas capex shock, battery reality, wind repricing,
+real-WACC consistency).** A pure *input* recalibration — no methodology changes — fixing the
+places where the world moved away from the mid-2025 calibration, all verified against current
+sources. The flagged staleness was strongly *correlated*: gas firming was understated while
+batteries were overstated, both biases working against the RE+storage build. (a) **Gas capex
+2×** (§7): the post-2024 turbine shortage has new CCGT orders at \$2,000–2,500/kW with ~2030
+delivery (GridLab 2025; EIA AEO2025) vs the Lazard-v17-era \$1,100; defaults move to the
+order-book values CCGT \$2,000 / OCGT \$1,000 (H₂-ready \$2,200/\$1,100) — a datacenter
+deciding *today* buys at today's prices. US pure-gas reference rises \$46→\$58/MWh, EU
+\$114→\$122 (2025). (b) **Battery recalibration** (§3, §6): 4h installed cost drops to ≈\$130/kWh
+US / ≈\$120 EU (energy \$90/kWh + power US \$160 / EU \$120/kW), anchored to BNEF's 2025 survey
+(US \$108 / EU \$101 turnkey + soft-cost margin) — and the regional premium **flips to the US**
+(Section 301 tariffs outweigh EU soft costs), reversing v5's EU-premium assumption. The
+Wright's-Law driver is restated on the honest basis: **global Li-ion production (EV +
+stationary)**, ≈5,000 GWh cumulative / ≈1,600 GWh added 2025 (the old 1,800/600 matched neither
+stationary-only nor all-Li-ion); the trajectory shape is nearly unchanged (additions/base ratio
+0.32 vs 0.33). (c) **Onshore wind repriced UP**: Lazard LCOE+ 2025 moved onshore wind to
+\$37–86/MWh (mid ≈\$61) on supply-chain/tariff inflation — `lcoe_today` 50→61 US, 48→56 EU.
+(d) **Solar learning rate 0.30→0.25**, the defensible central of module (~20–24%, ITRPV) and
+system-level estimates; 2040 solar \$21.9→\$25.9/MWh. (e) **Real-WACC consistency**:
+`LEGACY_WACC` (the basis the imported LCOEs are quoted at) 0.07→0.055 — the model works in
+real 2025\$, and Lazard levelises at ≈7.7% *nominal* ≈ 5.5% *real*; the old 0.07 treated
+nominal as real, so `rewacc_lcoe` granted RE a ~12% discount that was inflation counted twice.
+At the default solar/wind WACC (5.5% real) the re-WACC is now the identity (delivered solar
+\$45.5→\$52, wind \$43.6→\$61). (f) **Combustion-only carbon intensity** (0.41→0.345 CCGT,
+0.60→0.50 OCGT, tCO₂/MWh): the model charges the ETS-style carbon price, whose scope is stack
+CO₂; the old values implicitly priced some upstream methane at the ETS rate. (g) Smaller:
+grid-PPA energy \$45→\$55/MWh (LevelTen 2025), SMR FOAK \$120→\$150 US / \$140→\$175 EU (recent
+FOAK datapoints). Net direction: dearer gas + dearer delivered RE generation + cheaper storage;
+all §11 tables and figures regenerated. Also in v5.8: a **full-machinery audit** (weather
+statistics, dispatch/MC, optimisation/cost composition — see §12 for the verified-clean list
+and the remaining accuracy items with bias directions), which fixed three opt-in-path bugs:
+the gas cost layer's backup-capacity clip at 1.0× load (voided the documented cooling-profile
+upsizing), `opt_re` omitting the firm shed add-back (overstated achieved RE for interruptible
+workloads), and the LDES/H₂ analysis paths ignoring `solar_performance_ratio`. None affects
+the headline firm/flat results.
+
 **v5.7 — defensible deployment trajectory (S-curve learning), H₂-line fidelity, gas-baseline
 transparency, and observability.** The headline-moving change is the **deployment trajectory**
 (§3): through v5.6 cumulative capacity compounded annual additions at a *constant* growth rate,
@@ -228,7 +305,7 @@ then let a standard hill-climbing optimiser interpolate within that cached surfa
 the cheapest build that still meets the renewable target. "Multi-start" just means we try
 several starting points so a single bad start can't trap us in a local minimum.*
 
-The 3D optimisation is solved by multi-start Nelder-Mead with six starting points. The objective function evaluates via trilinear interpolation into a precomputed $21^3 = 9{,}261$-scenario dispatch surface (v5.1; §8.4), making each evaluation near-instantaneous.
+The 3D optimisation is solved by multi-start Nelder-Mead with seven fixed starting points (plus the previous year's optimum as a warm start, when available). The objective function evaluates via trilinear interpolation into a precomputed $21^3 = 9{,}261$-scenario dispatch surface (v5.1; §8.4), making each evaluation near-instantaneous. A **continuity tie-break** (v5.7) then adopts the previous year's build only if it is feasible at the same tolerance *and* within **1%** of the year's fresh optimum — suppressing cosmetic year-to-year mix flips without ever accepting a materially worse build (the fired count and cost deltas are printed as a `[diag]` line). Finally (v5.9) the chosen build is **re-evaluated on exact dispatch** over the stored weather years (`exact_point` — no interpolation), and the reported cost, RE fraction, breakdown and battery cycling all come from that exact pass; the interpolated surface is used only *inside* the optimisation loop. The served-RE feasibility tolerance is **0.2% absolute** (`RE_TOL`, tightened from 0.5% in v5.9).
 
 An exterior penalty method enforces the RE constraint:
 
@@ -283,9 +360,12 @@ letting growth taper. It lands the cumulatives (and the resulting 2040 doublings
 
 | Tech | $g_0$ | $\delta$ | 2030 | 2035 | **2040 central** | low ↔ high (2040) | 2040 doublings | 2040 LCOE |
 |------|-------|----------|------|------|------------------|-------------------|----------------|-----------|
-| Solar | 6%/yr | 0.85 | 6.7 TW | 11.0 TW | **15.6 TW** | ~11 ↔ ~22 TW | 2.42 | $21.9/MWh |
-| Wind  | 3%/yr | 0.85 | — | — | **4.2 TW**  | ~3 ↔ ~6 TW | 1.69 | $36.6/MWh |
-| Battery | 8%/yr | 0.85 | — | — | **14.5 TWh** | ~10 ↔ ~22 TWh | 3.01 | (×0.53 $/kWh) |
+| Solar | 6%/yr | 0.85 | 6.7 TW | 11.0 TW | **15.6 TW** | ~11 ↔ ~22 TW | 2.42 | $25.9/MWh |
+| Wind  | 3%/yr | 0.85 | — | — | **4.2 TW**  | ~3 ↔ ~6 TW | 1.68 | $44.6/MWh |
+| Battery (Li-ion prod.) | 8%/yr | 0.85 | — | — | **39 TWh** | ~36 ↔ ~45 TWh | 2.96 | (×0.54 $/kWh) |
+
+*(Battery basis, v5.8: the driver is global Li-ion **production**, EV + stationary — see the
+battery cost-basis note below — so the cumulatives are production TWh, not stationary BESS.)*
 
 The *low* and *high* columns bracket a slower-saturation / AI-supercharged range (vary $g_0$ by
 about ∓2 pts / +4 pts); they bound the learning-curve uncertainty. The fig1 *resource/siting*
@@ -297,22 +377,26 @@ clutter the headline figure).
 
 $$\text{LCOE}(t) = \text{LCOE}_0 \cdot \left(\frac{Q_t}{Q_0}\right)^{\log_2(1-\text{LR})}$$
 
-**Verification (v5.7 S-curve deployment):** For solar, $Q_{2040}/Q_{2025} = 15{,}557/2{,}900 = 5.36$ — corresponding to $\log_2(5.36) = 2.42$ doublings. With LR = 0.30, cost ratio = $(1-0.30)^{2.42} = 0.421$. So $\text{LCOE}_{2040} = 52 \times 0.421 = \$21.9$/MWh. ✓ (model output: $21.9/MWh)
+**Verification (v5.8 calibration):** For solar, $Q_{2040}/Q_{2025} = 15{,}557/2{,}900 = 5.36$ — corresponding to $\log_2(5.36) = 2.42$ doublings. With LR = 0.25, cost ratio = $(1-0.25)^{2.42} = 0.498$. So $\text{LCOE}_{2040} = 52 \times 0.498 = \$25.9$/MWh. ✓ (model output: $25.9/MWh)
 
 ### Solar LCOE trajectory (US, verified values)
 
 | Year | Cum. capacity (GW) | LCOE ($/MWh) |
 |------|--------------------|--------------|
 | 2025 | 2,900 | 52.0 |
-| 2028 | 5,069 | 39.0 |
-| 2030 | 6,660 | 33.9 |
-| 2035 | 10,972 | 26.2 |
-| 2040 | 15,557 | 21.9 |
+| 2028 | 5,069 | 41.2 |
+| 2030 | 6,660 | 36.8 |
+| 2035 | 10,972 | 29.9 |
+| 2040 | 15,557 | 25.9 |
 
-*These are the raw Wright's-Law learning-curve LCOEs (quoted at the legacy 7% WACC). v5.3
-re-annualises them at the solar/wind WACC of 5.5% via `rewacc_lcoe` (§8.3), multiplying the
-**delivered** generation LCOE by ≈0.876 (solar) / 0.902 (wind) — e.g. solar 2025 $52 → $45.5
-delivered. The learning shape is unchanged (constant multiplier).*
+*These are the raw Wright's-Law learning-curve LCOEs, quoted at `LEGACY_WACC` — since v5.8 the
+**real**-terms equivalent (5.5%) of Lazard's ≈7.7% *nominal* quote basis (the model works in
+constant 2025 dollars). The default solar/wind WACC (5.5% real) equals that basis, so
+`rewacc_lcoe` (§8.3) is the **identity** at defaults and the delivered generation LCOE equals
+the raw curve (solar 2025 = $52 delivered). The pre-v5.8 convention (LEGACY_WACC = 0.07,
+treating Lazard's nominal rate as real) granted RE a spurious ≈12% "cheaper capital" discount
+— inflation counted twice. The `wacc` lever still re-prices genuinely cheaper
+(hyperscaler-backed) or dearer capital.*
 
 ### Technology learning parameters
 
@@ -322,26 +406,40 @@ floor of 0 (S-curve; see the trajectory section above). The pre-v5.7 constant ra
 
 | Technology | LCOE₀ ($/MWh) | LR | Q₀ | ΔQ₀ | g₀ · δ |
 |------------|----------------|-----|-----|------|--------|
-| Solar PV (US) | 52 | 30% | 2,900 GW | 650 GW/yr | 6%/yr · 0.85 |
-| Solar PV (EU) | 60 | 30% | 2,900 GW | 650 GW/yr | 6%/yr · 0.85 |
-| Onshore Wind (US) | 50 | 17% | 1,300 GW | 167 GW/yr | 3%/yr · 0.85 |
-| Onshore Wind (EU) | 48 | 17% | 1,300 GW | 167 GW/yr | 3%/yr · 0.85 |
-| LFP Battery (energy, US) | 180 $/kWh | 19% | 1,800 GWh | 600 GWh/yr | 8%/yr · 0.85 |
-| LFP Battery (power, US) | 140 $/kW | 19% | (same) | (same) | 8%/yr · 0.85 |
-| LFP Battery (energy, EU) | 180 $/kWh | 19% | 1,800 GWh | 600 GWh/yr | 8%/yr · 0.85 |
-| LFP Battery (power, EU) | 175 $/kW | 19% | (same) | (same) | 8%/yr · 0.85 |
+| Solar PV (US) | 52 | 25% | 2,900 GW | 650 GW/yr | 6%/yr · 0.85 |
+| Solar PV (EU) | 60 | 25% | 2,900 GW | 650 GW/yr | 6%/yr · 0.85 |
+| Onshore Wind (US) | 61 | 17% | 1,300 GW | 167 GW/yr | 3%/yr · 0.85 |
+| Onshore Wind (EU) | 56 | 17% | 1,300 GW | 167 GW/yr | 3%/yr · 0.85 |
+| LFP Battery (energy, US) | 90 $/kWh | 19% | 5,000 GWh | 1,600 GWh/yr | 8%/yr · 0.85 |
+| LFP Battery (power, US) | 160 $/kW | 19% | (same) | (same) | 8%/yr · 0.85 |
+| LFP Battery (energy, EU) | 90 $/kWh | 19% | 5,000 GWh | 1,600 GWh/yr | 8%/yr · 0.85 |
+| LFP Battery (power, EU) | 120 $/kW | 19% | (same) | (same) | 8%/yr · 0.85 |
 
-**Battery cost basis (v5).** Installed cost is split into an **energy** component
-($/kWh, scales with MWh) and a **power/BOS/EPC** component ($/kW, scales with MW).
+The solar LR (v5.8: 0.30 → **0.25**) is the defensible central of module-price learning
+(~20–24%, ITRPV) and system-level LCOE estimates (20–25%; BOS/soft costs learn slower than
+modules); 0.30 was the aggressive end (Way et al. 2022, hardware-only). Wind LCOE₀ (v5.8:
+50 → **61** US, 48 → **56** EU) is the Lazard LCOE+ 2025 onshore mid (range $37–86/MWh —
+US wind *rose* on supply-chain/tariff inflation; the 2024 edition's $27–73 is stale). The
+wind Q₀/ΔQ₀ are the **total** wind fleet (on- + offshore, shared supply chain): 1,299 GW
+end-2025, 165 GW added 2025 (GWEC) — matched by 1,300/167.
+
+**Battery cost basis (v5, recalibrated v5.8).** Installed cost is split into an **energy**
+component ($/kWh, scales with MWh) and a **power/BOS/EPC** component ($/kW, scales with MW).
 LFP cells are a globally traded commodity, so the energy component is
-**region-invariant** ($180/kWh); only the power/BOS component carries a regional
-soft-cost premium (US $140/kW; EU $175/kW, reflecting higher labour/permitting and
-no IRA-equivalent credit). A 4h system therefore costs $4{\times}180 + 140 = \$860$/kW-load
-(US) ≈ $215/kWh installed, vs $895/kW-load (EU). This replaces v4's energy costs
-of $220/kWh (US) and $80/kWh (EU), which were on inconsistent bases (a system price
-vs. a near-cell price) and made EU storage implausibly ~2.75× cheaper.
+**region-invariant** ($90/kWh); only the power/BOS component carries a regional
+soft-cost premium — which since v5.8 sits on the **US** ($160/kW vs EU $120/kW): BNEF's 2025
+cost survey has US 4h turnkey ≈ $108/kWh vs EU ≈ $101 (Section 301 tariffs on Chinese cells
+outweigh EU labour/permitting), reversing the v5–v5.7 EU-premium assumption. A 4h system
+therefore costs $4{\times}90 + 160 = \$520$/kW-load (US) ≈ $130/kWh installed, vs
+$480/kW-load (EU) ≈ $120/kWh — both a developer soft-cost/interconnection margin above BNEF
+turnkey. **Learning driver (v5.8):** the Wright's-Law driver is **global Li-ion cell
+production (EV + stationary)** — what actually drives LFP cell cost — ≈5,000 GWh cumulative
+through 2025, ≈1,600 GWh added in 2025 (IEA GEVO / BNEF). The pre-v5.8 1,800/600 GWh matched
+neither stationary BESS (~600/315) nor all-Li-ion; the restated basis has a nearly identical
+additions/base ratio (0.32 vs 0.33), so the *trajectory shape* is essentially unchanged —
+this is an honesty fix, not a re-forecast.
 
-**Sources:** Lazard LCOE+ v18 (2025), Way et al. *Joule* (2022), OWID learning curves, NREL ATB 2024, BloombergNEF (2024–25), Ember BESS Report (2025).
+**Sources:** Lazard LCOE+ 2025 (June 2025), Way et al. *Joule* (2022), OWID learning curves, ITRPV, NREL ATB 2024, BloombergNEF Energy Storage System Cost Survey (2025), Ember BESS Report (2025), GWEC Global Wind Report (2026), IEA Global EV Outlook (2025).
 
 ### SMR cost trajectory
 
@@ -351,9 +449,13 @@ $$\text{LCOE}_{\text{SMR}}(t) = \begin{cases} \text{LCOE}_{\text{FOAK}} + (\text
 
 | Parameter | US | EU |
 |-----------|----|----|
-| FOAK ($/MWh) | 120 | 140 |
+| FOAK ($/MWh) | 150 | 175 |
 | NOAK ($/MWh) | 85 | 85 |
 | Years to NOAK | 10 | 12 |
+
+*(v5.8: FOAK 120→150 US / 140→175 EU — recent FOAK datapoints (NuScale/UAMPS implied ~$120+
+in 2023$ before cancellation; GE-Hitachi Darlington capex) sit well above the old values.
+NOAK $85 remains the standard industry target; σ = 0.25 acknowledges the spread.)*
 
 SMR is a reference technology only, not included in the optimisation.
 
@@ -378,11 +480,11 @@ below.
 
 | Component | US ($/MWh) | EU ($/MWh) | Source |
 |-----------|-----------|-----------|--------|
-| PPA energy (2025) | 45 | 72 | LevelTen PPA Price Index (2024–25) |
+| PPA energy (2025) | 55 | 72 | LevelTen PPA Price Index (2025; US prices rose on interconnection/tariff pressure) |
 | Grid delivery / network | 22 | 33 | Large-C&I network tariffs (EIA / ENTSO-E) |
-| Firming / balancing premium | 8 | 12 | Lazard v18 firming adders |
-| **All-in 2025** | **75** | **117** | |
-| **All-in 2040** (energy follows solar LR) | **≈42** | **≈64** | |
+| Firming / balancing premium | 8 | 12 | Lazard firming adders |
+| **All-in 2025** | **85** | **117** | |
+| **All-in 2040** (energy follows solar LR) | **≈57** | **≈81** | |
 
 **What it shows.** Grid+PPA sits well below the off-grid high-RE optimum in both
 regions and below carbon-priced EU off-grid gas — i.e. **going off-grid is itself a
@@ -391,7 +493,7 @@ was compared only to off-grid gas. The base PPA line represents *annual-volumetr
 matching (RECs/PPA netted over the year). A **second reference, Grid + 24/7 CFE**
 (`grid_cfe_trajectory`), adds a flat `cfe_premium_mwh` (US $40, EU $55) for hour-by-hour
 carbon-free matching — the Google/Microsoft target, which needs firm-clean / storage /
-deep overbuild to cover every hour and so costs more (US ≈$115→$82, EU ≈$172→$119 over
+deep overbuild to cover every hour and so costs more (US ≈$125→$97, EU ≈$172→$136 over
 2025→2040). Both are stylised, adjustable reference lines, never part of the optimisation.
 
 ---
@@ -429,11 +531,23 @@ the stochastic cloud factor equals $\bar I/24$ — see §4.2 (v5.5 double-count 
 
 ### 4.2 Solar — stochastic cloud attenuation
 
-Daily cloud cover $\xi_d \in [0,1]$ drawn from a Beta distribution with AR(1) persistence:
+Daily cloud cover $\xi_d \in [0,1]$ has a Beta marginal with AR(1) persistence carried in
+the **latent normal** (v5.9):
 
-$$\xi_d^* \sim \text{Beta}(\alpha=3,\; \beta=1.5) \qquad \mu = \frac{3}{4.5} = 0.667$$
+$$h_d = \rho_c\, h_{d-1} + \sqrt{1-\rho_c^2}\;e_d, \qquad \rho_c = 0.35
+\qquad (h_d \sim N(0,1) \text{ stationary})$$
 
-$$\xi_d = \rho_c \cdot \xi_{d-1} + (1-\rho_c) \cdot \xi_d^*, \qquad \rho_c = 0.35$$
+$$\xi_d = F^{-1}_{\text{Beta}(3,\,1.5)}\big(\Phi(z_{1,d})\big), \qquad
+z_{1,d} = \lambda f_d + \sqrt{1-\lambda^2}\, h_d \qquad \mu = \tfrac{3}{4.5} = 0.667$$
+
+Because $z_{1,d}$ is standard normal *every day*, the Beta(3,1.5) marginal holds **exactly**
+— deep-overcast days ($\xi<0.3$) occur at the Beta frequency (5.2% of days). *(v5.9 fix:
+through v5.8 the persistence was an AR filter applied AFTER the Beta transform,
+$\xi_d = \rho_c \xi_{d-1} + (1-\rho_c)\xi_d^*$, which shrank the cloud variance ~40% —
+single-day solar droughts occurred at ~1.3% instead of 5.2%, flattering solar-heavy builds —
+and diluted the realized wind-solar correlation, see §4.3.)* Day-to-day cloud persistence is
+$\lambda^2\varphi + (1-\lambda^2)\rho_c \approx 0.47$ at the defaults (synoptic + local terms;
+measured ≈0.45 in simulation).
 
 **Hourly solar capacity factor:**
 $$\text{CF}_{\text{sol}}(h) = \text{CF}_{\text{cs}}(h) \cdot \xi_{\lfloor h/24 \rfloor}$$
@@ -482,7 +596,16 @@ When $\rho < 0$ (Northern Europe): clear-sky days $(Z_1 > 0)$ tend to coincide w
 | US | 0.0 | No systematic correlation |
 | EU | −0.35 | Stronger wind on overcast days (cyclonic patterns) |
 
-**v5 note.** $\rho$ is now the *contemporaneous* (same-day) correlation, realised as the **residual** part of the two-factor model in §4.6: a persistent synoptic factor loads positively on both wind and solar (creating joint multi-day lows), while the residual pair carries the cyclonic $\rho<0$. The net same-day correlation still equals $\rho$.
+**v5 note.** $\rho$ is now the *contemporaneous* (same-day) correlation, realised as the **residual** part of the two-factor model in §4.6: a persistent synoptic factor loads positively on both wind and solar (creating joint multi-day lows), while the residual pair carries the cyclonic $\rho<0$. The net same-day correlation of the latent pair equals $\rho$ exactly.
+
+**v5.9 note — the realized correlation now matches.** Through v5.8 the post-transform cloud
+filter (old §4.2) diluted the realized daily *capacity-factor* correlation to ≈half the
+configured $\rho$ and biased it positive (EU −0.35 realized ≈−0.18; US 0 realized ≈+0.07).
+With persistence moved into z-space the realized correlation is restored: EU −0.35 →
+measured ≈**−0.28** (the residual gap is the inherent attenuation of a *Pearson* correlation
+through monotone marginal transforms — rank/Spearman correlation is preserved exactly); US
+0 → ≈0.00. $\rho$ should be read as the latent (copula) correlation; if calibrating against
+an observed ERA5 CF-correlation, target the realized value, ~0.8× the configured one.
 
 ### 4.4 Wind — mean-reverting AR(1)-on-quantiles model
 
@@ -572,6 +695,15 @@ chosen so $\text{corr}(z_1,z_2)=\rho$ exactly (validity requires $\lambda^2 \le 
 
 **Verified effect (8-year EU sample, 5× solar + 4× wind):** the longest spell with 24h-average generation below load grows from ~203h (no synoptic factor) to ~324h mean / 562h max — i.e. realistic week-scale lulls now appear — while $\overline{\text{CF}}_{\text{sol}}$ and $\overline{\text{CF}}_{\text{win}}$ are unchanged to within Monte-Carlo noise.
 
+**Mid-summer seam (v5.9).** Each simulated year's daily latent series $(z_1, z_2)$ is rolled
+182 days so the AR-chain start/end seam falls in early **July**: the winter half-year — where
+Dunkelflaute risk lives — is one contiguous stretch of the chain, and a lull spanning the
+calendar year boundary (Dec→Jan) is fully represented instead of being severed at Jan 1
+(pre-v5.9, persistent states restarted at the trace boundary in mid-winter, mildly thinning
+extreme multi-week lull statistics). The processes are stationary/seasonless, so the roll
+changes no distribution; calendar seasonality (clear-sky, winter wind amplification) stays
+calendar-aligned.
+
 ### 4.7 Spatial diversification — geographic portfolio (`n_sites`)
 
 *Intuition: a real high-RE operator does not build on one patch of ground; it spreads
@@ -589,8 +721,17 @@ $$f^{(i)}_d = \sqrt{c}\;f^{\text{common}}_d + \sqrt{1-c}\;f^{(i),\text{indep}}_d
 c = \texttt{site\_synoptic\_corr}\in[0,1]$$
 
 so any two sites have synoptic correlation $c$ while each $f^{(i)}$ keeps the same
-AR(1)$(\varphi)$ law. Each site then runs the full §4.1–4.6 machinery (independent local
-cloud and wind residuals), and the portfolio CF is the **average** of the $N$ site traces.
+AR(1)$(\varphi)$ law. Each site then runs the full §4.1–4.6 machinery, and the portfolio CF
+is the **average** of the $N$ site traces.
+
+**Shared local weather (v5.9, `site_local_corr`).** Through v5.8 the local cloud/wind
+residuals were fully independent per site, so the effective cross-site daily correlation was
+only $\lambda^2 c \approx 0.18$ at the defaults — but real intra-region sites (100–300 km
+apart) also share local weather (observed daily cross-correlations ~0.3–0.6), so the
+portfolio *overstated* diversification. The local residuals are now mixed the same way as
+the synoptic factor, with $c_\ell = $ `site_local_corr` (default **0.4**, the literature
+mid-range): total cross-site latent daily correlation $= \lambda^2 c + (1-\lambda^2)c_\ell$.
+Set `site_local_corr=0` to recover the pre-v5.9 behaviour.
 
 Two properties make this safe and meaningful:
 
@@ -613,6 +754,41 @@ to ≈\$91 (5 sites, $c{=}0.5$) — a ~40% reduction — with mean solar/wind CF
 ±0.001. **Caveat:** like the synoptic factor itself (§12), $c$ is calibrated, not fitted —
 treat the *direction and rough magnitude* as robust and the exact figure as dependent on
 the inter-site correlation, which should be set from reanalysis for a specific portfolio.
+
+### 4.8 Real-weather headline & LCOE re-levelling (v6.0)
+
+Through v5.9 the headline ran on the synthetic generator (§4.1–4.6), calibrated so its mean
+CFs sat inside Lazard's bands (the v5.5 CF-consistency invariant). v6.0 instead drives the
+headline suite with **measured ERA5 reanalysis** at one representative data-center market per
+region — **US: ERCOT Texas; EU: France** — loaded through the same `weather_years` hook the
+`--weather` flag uses (`tools/fetch_era5.py` → `solar`/`wind` hourly CF, 11 years 2015–2025).
+A *single* real site is deliberate: a single off-grid datacenter gets one site's weather, not
+the geographic smoothing of a portfolio (§4.7), so the headline must not borrow it.
+
+**Why re-level.** The dispatch's per-MWh generation cost is `C · CF · LCOE` (§6): the imported
+Lazard LCOE is levelised at a *reference* CF, and multiplying by the simulated CF only recovers
+the right $/MWh when the two agree. Real ERA5 gives the *site's* CF, which generally differs.
+A panel or turbine costs the same `$/kW` wherever it stands, so we hold that capital fixed and
+re-express the LCOE at the real CF:
+
+$$\text{LCOE}_{\text{real}} = \text{LCOE}_{\text{today}} \cdot \frac{\text{CF}_{\text{ref}}}{\text{CF}_{\text{real}}}$$
+
+where $\text{CF}_{\text{ref}}$ is the synthetic CF for the region's resource (the Lazard-anchored
+basis) and $\text{CF}_{\text{real}}$ the mean CF of the supplied years. Substituting back,
+`C · CF_real · LCOE_real = C · CF_ref · LCOE_today`: **cost tracks the fixed capital while energy
+follows the real weather** — the CF-invariant, at the real site. It is applied once in
+`run_simulation` (scaling the `solar`/`wind` `lcoe_today`), so it propagates to every consumer —
+the RE-target lines, the gas-free H₂ line, the cost-MC band. Realised: **Texas** solar 0.265 /
+wind 0.320 (re-level ×0.86 / ×1.04 — sunny Texas makes solar *cheaper* per MWh); **France** solar
+0.183 / wind 0.135 (×0.86 / ×2.1 — poor French wind roughly doubles wind's $/MWh). The synthetic
+generator still backs every sensitivity that needs the resource as a free knob (resource band —
+auto-skipped under fixed real weather — tornado, `--resource`).
+
+**Caveat — the site carries the result.** A single real cell is only as representative as the
+cell. Inland low-wind sites read low (e.g. ERA5 Ashburn, VA: 100 m wind ~4.7 m/s → CF 0.085 via
+the §4.5 curve; a 100→150 m hub-height shear lifts it only to ~0.10), so the US anchor is Texas,
+whose measured resource matches the cost basis, rather than the #1-by-floorspace but
+pathologically-poor-wind Virginia. Re-fetch a precise point (`tools/fetch_era5.py`) to site-tune.
 
 ---
 
@@ -709,10 +885,10 @@ carbon-priced markets.
 
 **Sensitivity.** `--flex-sweep` sweeps `interruptible_fraction × shed_penalty` and emits a
 2D heatmap (delivered LCOE + parity year). For EU 90% RE in 2030 it shows the
-sharp threshold at the gas variable cost (~$120/MWh): below it, more interruptibility →
-lower cost and earlier parity (down to ~$32/MWh, parity 2025 at 95% interruptible /
-$25 compute); at or above it, the system is firm ($174/MWh, parity 2035). See
-`figs/eu_flex_heatmap.png`.
+sharp threshold at the gas variable cost (~$100/MWh in EU 2030, v5.8 combustion-only carbon): below it, more interruptibility →
+lower cost and earlier parity (down to ~$34/MWh, parity 2025 at 95% interruptible /
+$25 compute); at or above it, the system is firm (~$165/MWh at the sweep's reduced
+fidelity). See `figs/eu_flex_heatmap.png`.
 
 ### 5.6 What "90% RE" means
 
@@ -823,17 +999,21 @@ $$C_{\text{batt}}^{\text{ann}} = \text{NPV}_{\text{batt}} \cdot \text{CRF}(r, n)
 
 where $\phi_{\text{OM}} = 0.015$ (1.5%/yr O&M) and $\text{CRF}(0.07, 20) = 0.0944$.
 
-**Verified delivered battery costs (2025, 0.5 EFC/day, v5.4 augmentation):**
+**Verified delivered battery costs (2025, 0.5 EFC/day, v5.4 augmentation, v5.8 capex basis):**
 
 | Storage duration | Delivered cost (US) | Delivered cost (EU) |
 |-----------------|--------------------|--------------------|
-| 2h | $7.4/MWh | $7.9/MWh |
-| 4h | $13.1/MWh | $13.6/MWh |
-| 8h | $23.6/MWh | $23.9/MWh |
-| 12h | $34.7/MWh | $34.9/MWh |
-| 24h | $68.6/MWh | $68.7/MWh |
+| 2h | $4.8/MWh | $4.3/MWh |
+| 4h | $7.7/MWh | $7.2/MWh |
+| 8h | $12.4/MWh | $12.1/MWh |
+| 12h | $17.7/MWh | $17.6/MWh |
+| 24h | $34.5/MWh | $34.4/MWh |
 
-These are ~30–35% below the v5.3 full-replacement figures (e.g. 4h US $20.2 → $13.1), because augmentation refreshes only the faded cell fraction rather than the entire system. US and EU remain nearly identical (region-invariant cells; EU marginally higher via the power/BOS premium). Consistent with NREL ATB 2024 augmentation methodology and Ember 2025 LCOS ranges.
+The augmentation model (vs full replacement) is worth ~30–35% by itself (v5.4); the v5.8
+capex recalibration ($130/kWh US installed 4h, BNEF 2025 anchor) takes the 4h US delivered
+cost from $13.1 to $7.7/MWh. US and EU remain nearly identical (region-invariant cells; the
+US marginally higher via the tariff-driven power/BOS premium). Consistent with NREL ATB
+augmentation methodology, BNEF 2025 system prices, and Ember 2025 LCOS ranges.
 
 ---
 
@@ -865,17 +1045,18 @@ where $K_{\text{gas}}$ is the peak backup capacity factor (maximum hourly residu
 purchased **green hydrogen** in an H₂-capable turbine — economically "a gas plant with
 pricey, zero-carbon fuel", so it reuses the entire formula above with $\varepsilon_g=0$
 (no combustion CO₂), a higher fuel price ($p_{\text{gas}}=\$46$/MMBtu ≈ \$5.25/kg LHV,
-Lazard LCOH v4.0 unsubsidized PEM), and a modestly higher turbine capex. It trades EU carbon exposure for expensive fuel: at
-EU 90% RE the 100%-firming reference is ≈\$250/MWh (flat, carbon-free) vs natural gas's
-\$114→\$163 rising path, but because the firm system burns it only ~10% of hours, an RE+H₂
+Lazard LCOH v4.0 unsubsidized PEM), and a modestly higher turbine capex. It trades EU carbon exposure for expensive fuel: a
+pure-H₂ plant (the 100%-firming reference) is ≈\$330/MWh (flat, carbon-free) vs natural gas's
+\$122→\$163 rising path, but because the firm system burns it only ~10% of hours, an RE+H₂
 build still lands well below pure H₂ and decarbonises the residual. Stylised & adjustable
 (`GAS_H2`). The breakdown figures (`fig4`/`fig5`) label the firming bands generically
 ("Firming — capex / fuel + O&M / carbon"), so they are correct under either firming
 (green-H₂'s carbon band is ~0 and auto-hidden). `run_firming_comparison` (CLI
 `--firming-compare`) re-optimises the same datacenter under gas vs green-H₂ firming and
 plots both delivered-cost trajectories: in the EU at 90% RE green-H₂ firming costs
-≈ +$24–40/MWh, a premium that **narrows over time** as the EU carbon price makes gas
-firming dearer (the pure-gas reference rises to cross the RE+H₂ delivered cost ≈ 2036).
+≈ +$27–37/MWh (v5.9: +$37 in 2025 narrowing to +$27 by 2040), a premium that **narrows over
+time** as the EU carbon price makes gas firming dearer (the pure-gas reference rises to cross
+the RE+H₂ delivered cost ≈ 2039).
 
 **Firm CLEAN baseload firming — geothermal & hydro (opt-in, `--firming geothermal|hydro`, v5.7).**
 The same "a power plant with X" trick extends to firm *zero-carbon* resources some sites enjoy:
@@ -904,13 +1085,13 @@ and hydro sites run on the firm-clean baseload above. It emits a ranked bar char
 `figs/eu_siting_map_phs.png`; cartopy coastlines/borders, plain lon/lat-scatter fallback) so the map
 never silently picks H₂ vs PHS per site — plus `output/eu_siting_results.json`.
 
-**Result (2030, delivered \$/MWh, real ERA5 2018–2024):** firm clean baseload wins decisively —
+**Result (2030, delivered \$/MWh, real ERA5 2018–2024, v5.9):** firm clean baseload wins decisively —
 Nordic/Alpine **hydro ≈ \$46** (Norway, Sweden, the Alps) and Iceland **geothermal ≈ \$63** beat
-every build-it-yourself sun+wind site and sit far below gas (EU ~\$125). The sun+wind sites rank by
+every build-it-yourself sun+wind site and sit far below gas (EU ~\$131). The sun+wind sites rank by
 their **best available firming** (both firmings are shown — see the fairness note): **Gran Canaria
-≈\$69, East Crete ≈\$75, Tarifa ≈\$82, SW Sicily ≈\$84, Sines ≈\$89** (pumped-storage-firmed), then
-the flat H₂-only sites **Jutland ≈\$114** and **Dover ≈\$116**, and the harder cases **Switzerland
-≈\$130** and **Romania ≈\$144** (below). The chart/table also report a **75% RE + gas** build (firm
+≈\$70, East Crete ≈\$77, Tarifa ≈\$84, SW Sicily ≈\$88, Sines ≈\$93** (pumped-storage-firmed), then
+the flat H₂-only sites **Jutland ≈\$118** and **Dover ≈\$121**, and the harder cases **Switzerland
+≈\$135** and **Romania ≈\$152** (below). The chart/table also report a **75% RE + gas** build (firm
 solar+wind+battery, EU gas on the residual ~25%) — at 75% (not 85%) so it clears the ~80% solar+
 battery wall and is feasible at every site with real wind. Candidates are chosen as *promising*
 clean-power sites, not typical markets.
@@ -923,40 +1104,43 @@ firming *not* chosen, and **two maps** (one per firming, shared colour scale) �
 availability from the **ANU Global Pumped Hydro Atlas**. Where strong sun+wind **co-locates** with
 reservoir terrain — the Iberian/Mediterranean sierras and mountainous islands (Tarifa, Sines,
 SW Sicily, East Crete, Gran Canaria with its real Chira-Soria scheme) — PHS is markedly cheaper
-than H₂ (**Crete \$75 / Tarifa \$82 / Sicily \$84** vs ~\$105–127 via H₂), approaching the firm
+than H₂ (**Crete \$77 / Tarifa \$84 / Sicily \$88** vs ~\$108–132 via H₂), approaching the firm
 hydro (\$46) / geothermal (\$63) leaders, because its 0.80 round-trip wastes far less overbuild
 than H₂'s 0.35.
 
 Two honesty points the relocation to real wind resources surfaced. **(1) Wind and PHS terrain are
 not always co-located.** Mountainous islands have both; but **Romania**'s wind is on the flat Black
 Sea coast (Dobrogea, its windiest region) while its pumped storage is inland in the Carpathians, so
-the single-site off-grid model firms Dobrogea with H₂ (≈\$144) — combining the two would need a grid.
+the single-site off-grid model firms Dobrogea with H₂ (≈\$152) — combining the two would need a grid.
 **Switzerland** is genuinely wind-poor (best Jura wind CF ≈0.04), so even with world-class PHS its
-off-grid RE+PHS cost is high (≈\$130) — its real edge is firm *conventional* hydro generation.
+off-grid RE+PHS cost is high (≈\$135) — its real edge is firm *conventional* hydro generation.
 **(2) In carbon-priced EU, partial-gas is not the cheap fallback:** the 75%-RE+gas build undercuts
 the fully-clean one only at the flat sites where clean firming (H₂) is itself dear (Jutland, Dover);
 where PHS makes clean firming cheap, **going 100% zero-carbon beats 75%-RE-plus-gas**, because
 carbon-taxed gas costs more than the extra clean storage. So the verdict is nuanced and defensible:
 PHS is transformative **only where good sun/wind *and* pumped-storage terrain coincide**.
 
-**Pure gas reference** (CCGT at 85% CF, verified values):
+**Pure gas reference** (CCGT at 85% CF, verified values, v5.8 capex):
 
 | | US | EU 2025 | EU 2030 | EU 2035 |
 |-|----|---------|---------|----|
 | Gas price ($/MMBtu) | 4.0 | 10.0 | 10.0 | 10.0 |
 | Carbon price ($/tCO₂) | 0 | 70 | 98 | 154 |
-| Pure LCOE ($/MWh) | **46.1** | **113.8** | **125.2** | **148.3** |
+| Pure LCOE ($/MWh) | **58.4** | **121.5** | **131.1** | **150.6** |
 
-*(v5.3: gas financed at a 9% WACC — slightly higher capex recovery than the legacy
-flat 7%, which raised the pure-gas reference by ≈$2.4/MWh US and ≈$2.4–3/MWh EU.)*
+*(Gas financed at a 9% real WACC (v5.3 per-tech financing). v5.8 recalibration: CCGT capex
+$1,100 → $2,000/kW — the post-2024 turbine-shortage order book (GridLab 2025 / EIA AEO2025:
+new orders $2,000–2,500/kW with ~2030 delivery; only the already-contracted 2026–27 pipeline
+still sees $1,100–1,400) — partially offset on the EU side by the combustion-only carbon
+intensity (0.41 → 0.345 tCO₂/MWh, the ETS-consistent scope). Net: US +$12.3, EU 2025 +$7.7.)*
 
 **Gas-baseline asymmetry & the "gas-stress" reference line (v5.7).** The headline holds gas
 fuel flat (US $4/MMBtu with **$0 carbon to 2040**; EU $10/MMBtu). That makes US gas a very low,
 very *stable* floor — which is *why* US high-RE struggles to cross it — but it is an assumption,
 not a fact: Henry Hub has ranged $2–9, AI-datacenter demand is a real upward pressure, and a US
 carbon price is a policy possibility. Two transparency features make this visible. (a) The suite
-plots a **gas-stress reference line** (`gas_stress_mult`, default ×1.6 → US ≈$62/MWh, EU
-≈$153/MWh in 2025) — the same plant at a stressed fuel price, a dot-dashed line on fig1; US
+plots a **gas-stress reference line** (`gas_stress_mult`, default ×1.6 → US ≈$74/MWh, EU
+≈$160/MWh in 2025, v5.8 capex) — the same plant at a stressed fuel price, a dot-dashed line on fig1; US
 70%-RE crosses *it* by ~2030 even though it never crosses the $4 baseline. (b) The **tornado**
 (§9) includes a *gas-price ∓25%* lever and a *carbon-introduction* lever (+$40/tCO₂), which for
 the US is the single largest mover of the parity gap. The point: the robust US conclusion is
@@ -990,18 +1174,24 @@ This is normalised so $p(0) = p_0$ exactly. The EU default parameters ($p_0 = \$
 
 | Parameter | US | EU | Source |
 |-----------|----|----|--------|
-| CCGT capex ($/kW) | 1,100 | 1,100 | Lazard v18 |
-| OCGT capex ($/kW) | 500 | 500 | Lazard v18 |
-| CCGT FOM ($/kW-yr) | 15 | 15 | Lazard v18 |
-| OCGT FOM ($/kW-yr) | 10 | 10 | Lazard v18 |
+| CCGT capex ($/kW) | 2,000 | 2,000 | GridLab 2025 / EIA AEO2025 order book (v5.8) |
+| OCGT capex ($/kW) | 1,000 | 1,000 | GridLab 2025: CTs in service 2025 $728–1,544/kW (v5.8) |
+| CCGT FOM ($/kW-yr) | 15 | 15 | Lazard |
+| OCGT FOM ($/kW-yr) | 10 | 10 | Lazard |
 | CCGT heat rate (MMBtu/MWh) | 6.5 | 6.5 | EIA; ~52% LHV |
 | OCGT heat rate (MMBtu/MWh) | 9.5 | 9.5 | EIA; ~36% LHV |
-| VOM ($/MWh) | 3.0 | 3.0 | Lazard v18 |
+| VOM ($/MWh) | 3.0 | 3.0 | Lazard |
 | Gas price ($/MMBtu) | 4.0 | 10.0 | EIA Henry Hub; TTF forward |
-| CCGT CO₂ intensity (tCO₂/MWh) | 0.41 | 0.41 | IPCC AR6 |
-| OCGT CO₂ intensity (tCO₂/MWh) | 0.60 | 0.60 | IPCC AR6 |
+| CCGT CO₂ intensity (tCO₂/MWh) | 0.345 | 0.345 | combustion-only: 53.07 kg/MMBtu × HR (ETS scope, v5.8) |
+| OCGT CO₂ intensity (tCO₂/MWh) | 0.50 | 0.50 | combustion-only (v5.8) |
 | Carbon price trajectory | Linear ($0) | Logistic ($70→$200) | EU ETS Fit-for-55 |
 | Plant lifetime (yr) | 25 | 25 | Industry standard |
+
+*(v5.8 capex note: new turbine orders run $2,000–2,500/kW CCGT with ~2030 delivery slots; the
+pre-shortage Lazard-v17-era $1,100/$500 remain available as an explicit override for a
+"turbine queue clears" sensitivity. Carbon-intensity note: the model charges the ETS-style
+carbon price, whose scope is stack CO₂ only, so the intensity is combustion-only; the old
+0.41/0.60 implicitly priced some upstream methane at the ETS rate.)*
 
 ### 7.5 Long-duration storage & self-produced-H₂ firming (opt-in overlay, `--ldes`)
 
@@ -1082,21 +1272,19 @@ No RE target — it is all-green by construction (self-produced + purchased H₂
 pure cost minimisation on a years-vectorised chronological dispatch. It is **swept over
 market-H₂ price multipliers** to stress the deep-lull spike.
 
-**Finding (EU, 2035, self-produced-H₂ tanks).** Co-optimising is **much cheaper than the
-greedy overlay**: ~**$104/MWh** for a fully gas-free, zero-carbon, firm datacenter — vs
-~$150 greedy, and about level with the current (v5.5) gas-backed 90%-RE build (~$102, §11),
-so for roughly the cost of a 90%-RE-with-gas system you instead get a fully gas-free,
-zero-carbon one. (The pre-v5.5 gas-backed 90%-RE build cost ~$182; the v5.5 CF recalibration
-cut it to ~$102.) Crucially the optimal *shape*
-changes: freed from the wind-heavy Dunkelflaute hedge, it goes **solar-heavy + big
-electrolyser** (≈13× solar, ≈2× wind, ≈6 h LFP, **≈1.3 MW electrolyser**, ≈16 h H₂),
-self-producing ~95 % of firming and buying ~5 % from the market — turning cheap surplus
-solar into H₂ instead of paying for wind overbuild. **Spike hedge:** as market H₂ rises to
-2×/4×, the optimum builds more solar + electrolyser + store and buys less (4.6 %→1.8 %→1.0 %),
-with LCOE rising only to ~$112/$120 — i.e. self-production caps exposure to an H₂ price
-spike. (Caveats: the low $104 partly reflects the synthetic weather's sun/wind structure
-and the conservative tank/electrolyser learning; multi-start NM on reduced fidelity — treat
-the *shape* and *direction* as robust, the absolute as indicative.)
+**Finding (EU, 2035, self-produced-H₂ tanks, v5.9 inputs).** Co-optimising is **much cheaper
+than the greedy overlay**: ~**$120/MWh** for a fully gas-free, zero-carbon, firm datacenter —
+vs ~$169 greedy, and **below the gas-backed 90%-RE build of the same year (~$139, §11)**, so
+for less than the cost of a 90%-RE-with-gas system you get a fully gas-free, zero-carbon one.
+Crucially the optimal *shape* changes: freed from the wind-heavy Dunkelflaute hedge, it goes
+**solar-heavy + big electrolyser** (≈6× solar, ≈1.7× wind, ≈6 h LFP, **≈1.0 MW electrolyser**,
+≈12 h H₂), self-producing ~92 % of firming and buying ~8 % from the market — turning cheap
+surplus solar into H₂ instead of paying for wind overbuild. **Spike hedge:** as market H₂
+rises to 2×/4×, the optimum builds more solar + electrolyser + store and buys less
+(8.2 %→2.5 %→1.0 %), with LCOE rising only to ~$133/$143 — i.e. self-production caps exposure
+to an H₂ price spike. (Caveats: the synthetic weather's sun/wind structure and the
+conservative tank/electrolyser learning; multi-start NM on reduced fidelity — treat the
+*shape* and *direction* as robust, the absolute as indicative.)
 
 **In the figures.** The headline firm suite draws the **per-year trajectory** of this
 optimum (`h2_system_trajectory`, reusing the same `dispatch_h2_vec` + cost model, B_lfp
@@ -1108,21 +1296,22 @@ zero-carbon system can be read directly against the gas it displaces. The line t
 roughly the cost of the constrained 90%-RE-with-gas case (and *below* the cost of forcing RE
 past 90% with gas), because it is free to choose a solar-heavy, big-electrolyser mix instead of
 the wind-heavy Dunkelflaute hedge. EU trajectory (from `output/eu_firm_results.json`,
-`h2_system`): **$149/MWh (2025) → $110 (2035) → $101 (2040)**, crossing below pure gas around
-**2030** as EU carbon climbs (US: $140 → $94). (v5.7: these are now evaluated on the full
+`h2_system`): **$154/MWh (2025) → $119 (2035) → $111 (2040)**, crossing below pure gas around
+**2031** as EU carbon climbs (US: $146 → $105). (v5.7: these are now evaluated on the full
 50-year weather ensemble — the build is optimised on a 20-year subsample — fixing the v5.6
-fidelity asymmetry where the line ran on just 6 synthetic years; and they sit higher than v5.6
-because the deployment recalibration lifts deep-future solar/electrolyser-input costs.) These
+fidelity asymmetry where the line ran on just 6 synthetic years; v5.8/v5.9 lift them a few
+$/MWh via the dearer wind/generation inputs and the honest 1-day-drought statistics, partly
+offset by cheaper LFP.) These
 numbers are exported and regenerable (`tools/regen_doc_tables.py`), not hand-transcribed.
 
 *Robustness (verified).* Fixing B_lfp at 6h is benign — letting `run_ldes_joint` choose it
 freely lands at 5.5h (2025) → 6.0h (2040), within 0.5h across the trajectory, and the
 fixed-6h per-year optimum reproduces the free 5D joint optimum to <$1/MWh per year. The
-electrolyser box ceiling is **4.0 MW/MW-load** (raised from 1.5, kept in sync between
-`h2system._HI` and `run_ldes_joint`): the unconstrained optimum rises to ~1.7 MW/MW-load by
-2040 and would otherwise bind at 1.5 in the late years; the headroom removes that artefact
-at negligible cost (2040 LCOE 88.0→87.7). All other design variables (overbuild, H₂ store)
-sit interior to their bounds throughout.
+electrolyser box ceiling is **4.0 MW/MW-load** (raised from 1.5 in v5.7, where the optimum
+approached ~1.7 and would otherwise have bound; kept in sync between `h2system._HI` and
+`run_ldes_joint`): under the v5.8 inputs the unconstrained optimum peaks at ~1.2 MW/MW-load,
+comfortably interior. All other design variables (overbuild, H₂ store) sit interior to their
+bounds throughout.
 
 ---
 
@@ -1164,20 +1353,25 @@ WACC in their capital-recovery terms; gas plant capex uses the gas WACC over 25 
 | LFP battery | 7.0% | 20* | 0.0944 | moderate tech/cycling risk (*replacement horizon, §6) |
 | Gas (CCGT/OCGT) | 9.0% | 25 | 0.1018 | merchant + carbon-policy / stranding risk |
 
-These bracket the literature (NREL ATB 4.4–8.0% real; Lazard ~8% nominal ≈ 5.5% real for
-RE, higher for thermal). The legacy flat **7%** is recovered by setting every `wacc` to 0.07.
+These bracket the literature (NREL ATB 4.4–8.0% real; Lazard ~7.7% nominal ≈ 5.5% real for
+RE, higher for thermal). **All WACCs in the model are REAL rates** (the model works in
+constant 2025 dollars) — battery 7% real ≈ 9.2% nominal, gas 9% real ≈ 11.2% nominal.
 
 **Re-annualising the bundled generation LCOE (`rewacc_lcoe`).** The exogenous solar/wind
-LCOE is quoted at the legacy 7% (`LEGACY_WACC`). It splits into a capital-recovery part
-(fraction $1-\omega$, with $\omega=$ `om_frac_lcoe`) and a fixed-O&M part ($\omega$); only
-the capital part rescales with WACC:
+LCOE is quoted at `LEGACY_WACC` — since v5.8 **5.5%**, the *real*-terms equivalent of
+Lazard's ≈7.7% *nominal* after-tax quote basis at ~2.2% inflation. It splits into a
+capital-recovery part (fraction $1-\omega$, with $\omega=$ `om_frac_lcoe`) and a fixed-O&M
+part ($\omega$); only the capital part rescales with WACC:
 
-$$\text{LCOE}'_{\text{gen}} = \text{LCOE}_{\text{gen}} \cdot \left[(1-\omega)\,\frac{\text{CRF}(\text{wacc}, L)}{\text{CRF}(0.07, L)} + \omega\right]$$
+$$\text{LCOE}'_{\text{gen}} = \text{LCOE}_{\text{gen}} \cdot \left[(1-\omega)\,\frac{\text{CRF}(\text{wacc}, L)}{\text{CRF}(0.055, L)} + \omega\right]$$
 
-At the defaults this multiplies solar by **0.876** and wind by **0.902** (cheaper capital →
-lower delivered LCOE); it is the identity when wacc = 0.07, so the legacy results are
-recovered exactly. The factor is year-independent, so cost *trajectories* (and the
-grid+PPA line, which uses an LCOE ratio) keep their shape.
+At the defaults (solar/wind WACC = 5.5% real = the quote basis) this is the **identity** —
+delivered generation LCOE equals the imported curve. Pre-v5.8, `LEGACY_WACC` was 0.07
+(Lazard's *nominal* rate treated as real), so the transform multiplied solar by 0.876 and
+wind by 0.902 — a ~10–12% "cheaper capital" discount that was actually inflation counted
+twice; v5.8 removes it. The lever still re-prices genuinely cheaper or dearer capital, and
+the factor is year-independent, so cost *trajectories* (and the grid+PPA line, which uses
+an LCOE ratio) keep their shape.
 
 ### 8.4 Optimiser grid resolution & boundary guard (v5.1)
 
@@ -1329,8 +1523,21 @@ with real ERA5/NSRDB hourly-CF years instead of the synthetic generator (§12).
 ## 11. Key Results
 
 Headline = **FIRM (always-on)** workload: gas backup sized to 100% of load, nothing shed,
-capped opex. All values from `output/*_results.json` (June 2026; 50 MC weather years, 21³ grid,
-Dunkelflaute weather, per-tech WACC, v5.4 battery augmentation, **v5.5 CF recalibration**).
+capped opex. All values from `output/*_results.json` (June 2026; 21³ grid, per-tech WACC,
+v5.4 battery augmentation, v5.5 CF recalibration, **v5.8 input recalibration** —
+turbine-shortage gas capex, BNEF-2025 batteries, Lazard-2025 wind, real-terms WACC; and the
+**v6.0 real-weather headline** — see below).
+**v6.0 — measured weather (June 2026).** The headline is now driven by **real ERA5 reanalysis**
+(11 years, 2015–2025) at a single representative data-center market per region — **US: ERCOT
+Texas; EU: France** — instead of the synthetic generator. One real site (no spurious
+geographic smoothing a single off-grid datacenter does not get), with its actual hourly cloud /
+Dunkelflaute / sun↔wind structure and real interannual spread. The imported Lazard LCOEs are
+**re-levelled** from their synthetic reference CF to each site's real CF (holding $/kW capital
+fixed; §4.8), so cost and energy still refer to the same plant. Realised CFs: **US solar 0.265 /
+wind 0.320** (Texas — close to the prior synthetic 0.23/0.33, so the US story barely moves),
+**EU solar 0.183 / wind 0.135** (France — markedly poorer wind than the prior 0.16/0.29, which
+makes high-RE Europe materially dearer). The synthetic generator still backs every sensitivity /
+siting analysis (resource band, tornado, `--resource`), which need the resource as a free knob.
 Premium/AI workloads collapse to firm under the economic shed test, so these are the relevant
 numbers for any valuable datacenter. (Tables regenerated from the export via
 `tools/regen_doc_tables.py`.)
@@ -1339,21 +1546,24 @@ numbers for any valuable datacenter. (Tables regenerated from the export via
 
 | RE target | 2025 ($/MWh) | 2030 | 2035 | 2040 | vs gas 2025 | Crossover |
 |-----------|-------------|------|------|------|-------------|-----------|
-| 70% | 73.9 | 60.7 | 54.3 | 50.5 | +61% | >2040 |
-| 80% | 83.4 | 64.4 | 55.6 | 50.5 | +81% | >2040 |
-| 85% | 92.3 | 71.8 | 62.5 | 57.0 | +100% | >2040 |
-| 90% | 126.4 | 99.2 | 86.4 | 77.6 | +174% | >2040 |
-| **Gas** | **46.1** | **46.1** | **46.1** | **46.1** | — | — |
+| 70% | 82.9 | 71.6 | 65.1 | 60.4 | +42% | >2040 |
+| 80% | 88.9 | 72.7 | 65.1 | 60.4 | +52% | >2040 |
+| 85% | 100.3 | 82.6 | 73.8 | 68.4 | +72% | >2040 |
+| 90% | 137.3 | 111.4 | 98.6 | 90.6 | +135% | >2040 |
+| **Gas** | **58.4** | **58.4** | **58.4** | **58.4** | — | — |
+| *Grid+RE PPA (ref.)* | *85* | *69* | *62* | *57* | — | — |
 
-High-RE US never beats cheap untaxed gas within the horizon — $4/MMBtu → ~$46/MWh even at a
-9% WACC is a very low, very stable baseline, and high-RE needs heavy wind overbuild to ride
-out multi-day lulls. **Under the v5.7 deployment recalibration this conclusion strengthens:**
-the less-aggressive learning curve (solar cumulative S-curves to ~15.6 TW by 2040 rather than
-the old 38 TW) lifts the deep-future RE cost, so even **moderate 70–80% RE no longer crosses
-$46 gas by 2040** (the 70% line bottoms at ≈$50/MWh) — where pre-v5.7 it reached parity in the
-mid-2030s. The crossing returns only against a stressed gas baseline (the dot-dashed +60%-fuel
-reference line on fig1, ≈$62/MWh, which 70% RE beats by ~2030) — i.e. US RE competitiveness
-hinges on gas *not* staying at $4 forever.
+High-RE US never beats cheap untaxed gas within the horizon — $4/MMBtu → ~$58/MWh even at the
+v5.8 turbine-shortage capex is a very low, very stable baseline, and high-RE needs heavy
+overbuild to ride out multi-day lulls. On **real ERCOT-Texas weather** (v6.0) the picture is
+essentially unchanged from the prior synthetic headline — Texas's measured resource (solar
+0.265 / wind 0.320) sits right where the Lazard cost basis assumed, so re-levelling barely moves
+the lines and **moderate 70–80% RE still does not cross $58 gas by 2040** (the 70% line bottoms
+at ≈$60/MWh, a slightly nearer near-miss than the synthetic ≈$62). The crossing happens only
+against a stressed gas baseline (the dot-dashed +60%-fuel reference line on fig1, ≈$74/MWh,
+which 70–80% RE beats by ~2031–32) — i.e. US RE competitiveness hinges on gas *not* staying at
+$4 forever. That this holds on *measured* Texas weather — including its real Dunkelflaute and
+interannual spread — is a stronger statement than the synthetic version it replaces.
 
 **95% RE is omitted: it is infeasible for a firm, battery-only off-grid system.** Over the
 whole 21³ build grid the maximum achievable annual RE fraction is ≈**0.94 (EU)** / ≈**0.95 (US)**:
@@ -1368,29 +1578,35 @@ exceeds this ceiling, rather than silently reporting the penalty-saturated point
 
 | RE target | 2025 ($/MWh) | 2030 | 2035 | 2040 | vs gas 2025 | Crossover |
 |-----------|-------------|------|------|------|-------------|-----------|
-| 70% | 98.6 | 88.9 | 85.4 | 83.8 | −13% | **~2025** |
-| 80% | 107.3 | 90.6 | 86.6 | 84.3 | −6% | **~2025** |
-| 85% | 118.5 | 96.9 | 90.9 | 87.5 | +4% | **~2026** |
-| 90% | 156.1 | 125.4 | 113.6 | 106.5 | +37% | **~2030** |
-| **Gas** | **113.8** | **125.2** | **148.3** | **162.6** | — | — |
+| 70% | 135.2 | 119.1 | 115.8 | 113.7 | +11% | **~2027** |
+| 80% | 174.2 | 148.0 | 139.2 | 133.7 | +43% | **~2033** |
+| 85% | 225.9 | 187.7 | 171.7 | 161.6 | +86% | **~2040** |
+| 90% | 278.0 | 237.4 | 225.0 | 219.3 | +129% | >2040 |
+| **Gas** | **121.5** | **131.1** | **150.6** | **162.6** | — | — |
+| *Grid+RE PPA (ref.)* | *117* | *96* | *86* | *81* | — | — |
 
-EU gas is expensive and rising (carbon → logistic path toward $200/tCO₂). An always-on RE
-datacenter beats gas from ~2025 at 70–80% RE; **90% RE reaches parity ~2030** (the v5.7
-deployment recalibration nudges this a year later than the pre-v5.7 ~2029, as the
-less-aggressive learning curve lifts the late-2020s RE cost — but rising EU carbon still does
-most of the work, so the conclusion is unchanged). The earlier history still holds — v4 claimed
-"90% parity Q2 2025", and the honesty fixes (no free load-shedding, multi-day Dunkelflaute, a
-resolved optimiser, no free demand-deferral) pushed that out to the 2030s; v5.5 corrected the
-*opposite* error (a CF below the imported cost basis) pulling 90% back toward the late 2020s,
-and v5.7 settles it at ~2030 with a defensible deployment trajectory.
-(95% RE omitted — infeasible for the battery-only firm system, see the US note above.)
+EU gas is expensive and rising (carbon → logistic path toward $200/tCO₂), so even on poor
+weather *moderate* RE stays competitive — but **real French weather (v6.0) makes deep
+decarbonisation markedly dearer and pushes high-RE parity out of the horizon.** France's
+measured wind CF is only **0.135** — far below the prior synthetic EU 0.29 — so wind is both
+weaker and, after re-levelling, ~2× costlier per MWh, and riding out multi-day winter lulls now
+takes heavy solar+wind overbuild. The result: **70% RE still beats rising EU gas by ~2027**
+($135/MWh in 2025 → $114 by 2040, crossing the $122→$163 gas line ~2027), and **80% crosses
+~2033**; but **85% reaches parity only ~2040 and 90% not within the horizon** (90% is $278/MWh
+in 2025, still $219 in 2040 vs $163 gas). This is a real shift from the prior synthetic headline
+(which put 90% parity ~2033): the synthetic 0.29 wind was really a *good* EU site, and France —
+a fast-growing, nuclear-heavy data-center hub — is a genuinely poorer-wind one. The high-level
+history still holds — v4's "90% parity Q2 2025" was an artefact of free load-shedding and no
+multi-day Dunkelflaute; the honesty fixes pushed it to the 2030s; v5.5–v5.9 settled the
+*synthetic* 90% line near ~2033 — and v6.0 now shows that on a real poorer-wind hub, 90% off-grid
+RE simply does not reach cheap-firming parity by 2040. (95% RE omitted — infeasible for the
+battery-only firm system, see the US note above.)
 
-**Optimal EU 90% RE build (2025):** ≈ **6.4× solar + 5.0× wind + 6h storage** — roughly half
-the nameplate overbuild of the pre-v5.5 ~11× solar + 10× wind, because the CF-consistent
-resource (solar 0.16 / wind 0.29) generates the same energy from far less capacity. Storage
-stays ~6h: the binding constraint is multi-day Dunkelflaute energy, which generation overbuild
-covers more cheaply than batteries. (The 2025 build is unchanged from v5.5/v5.6 — the
-deployment recalibration only changes *future* unit costs, not the year-0 optimum.)
+**Optimal EU 90% RE build on real French weather (2025):** ≈ **9.9× solar + 9.0× wind + 6h
+storage** — much heavier than the prior synthetic ~6.6× solar + 5.0× wind, because France's poor
+real wind (CF 0.135) forces large overbuild of both to cover multi-day winter Dunkelflaute.
+Storage stays ~6h: the binding constraint is multi-day lull *energy*, which generation overbuild
+covers more cheaply than batteries (a 5-day lull would need ~120h of storage; see below).
 
 ### Why so much overbuild but only ~6h of battery?
 
@@ -1410,6 +1626,37 @@ Generation overbuild and storage solve *different* problems, with very different
 ---
 
 ## 12. Known Limitations
+
+**v5.8 full-machinery audit (June 2026) — and the v5.9 hardening that closed it.** The
+weather generator, dispatch/MC layer, and optimisation/cost-composition layer were
+independently audited (analytically and empirically). The core machinery verified clean:
+hourly energy balance closes to machine precision with efficiencies applied exactly once; the
+battery power de-rating is identical in dispatch and cost; FEC counting is exact against
+analytic test cases; the copula/AR(1) algebra is variance-normalised and stationary; the
+exterior penalty provably dominates the measured RE shadow prices (so constraints bind, not
+leak); per-tech WACC routing has no legacy-rate leak; and the P10/P90 bands measure capex
+uncertainty at a frozen build, as documented. Small opt-in-path bugs found and fixed in v5.8
+(the gas backup-capacity clip at 1.0× load; `opt_re` omitting the firm shed add-back; the
+LDES/H₂ paths ignoring `solar_performance_ratio`). The audit's substantive accuracy findings
+were then **implemented in v5.9** (changelog above; all empirically validated and
+regression-locked): the realized wind–solar correlation (was ≈half the configured ρ, biased
+positive → now ≈ρ up to inherent Pearson attenuation), the narrowed cloud marginal (deep
+overcast 1.3% → the exact Beta 5.2%), the ~1%-short US solar-CF anchor (now exact), the
+year-boundary lull severing (mid-summer seam), the overstated multi-site diversification
+(`site_local_corr`), the interpolated-surface optimum (now confirmed on exact dispatch), and
+the 0.5% feasibility tolerance (now 0.2%).
+
+Remaining known accuracy items, with directions of bias (all small):
+
+- **Pearson attenuation of ρ** through the monotone Beta/power-curve transforms: configured
+  −0.35 realizes ≈−0.28 (rank correlation is exact). Calibrate against an observed ERA5
+  CF-correlation by targeting the realized value (~0.8× the configured).
+- **Wind seasonal modulation** (±12% winter amplification) passes through the cubic power
+  curve, so it preserves mean *speed* exactly but shifts regional CF by ≈∓1.5% (Jensen) —
+  the simulated CFs that anchor the cost basis already include this.
+*(The audit's two remaining implementation items — the P90 sizing incoherences and the fig1
+H₂ warm-start-only optimisation — were closed in v5.9.1, along with the last duplicated LDES
+cost formula and the H₂/LDES paths' single-site-only weather seam.)*
 
 **Optimiser grid resolution (addressed in v5.1).** The optimiser interpolates trilinearly
 into a precomputed `grid_steps`³ gas-fraction surface. v5 used 15 nodes over oversized

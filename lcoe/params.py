@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, fields, replace
 
-MODEL_VERSION = "5.7.0"
+MODEL_VERSION = "6.0"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -51,20 +51,29 @@ class BatteryParams:
     """
     LFP battery storage: costs, efficiency, and degradation.
 
-    Cost basis (v5): the model splits installed cost into an ENERGY component
-    (`capex_kwh_today`, scales with MWh) and a POWER/BOS component
-    (`capex_kw_today`, scales with MW). LFP cells are a globally traded
-    commodity, so the energy component is region-invariant; only the
+    Cost basis (v5, recalibrated v5.8): the model splits installed cost into an
+    ENERGY component (`capex_kwh_today`, scales with MWh) and a POWER/BOS
+    component (`capex_kw_today`, scales with MW). LFP cells are a globally
+    traded commodity, so the energy component is region-invariant; only the
     power/BOS/EPC component carries a regional soft-cost premium. A 4h system
-    costs `4·capex_kwh + 1·capex_kw` per kW-load (e.g. US ≈ $860/kW-load →
-    ~$215/kWh installed), consistent with NREL ATB 2024 / BNEF 2024-25.
+    costs `4·capex_kwh + 1·capex_kw` per kW-load (e.g. US ≈ $520/kW-load →
+    ~$130/kWh installed). Anchor: BNEF Energy Storage System Cost Survey 2025 —
+    4h turnkey US ≈ $108/kWh (Chinese cells, incl. tariffs) / EU ≈ $101 /
+    global ≈ $110; the model adds a developer soft-cost/interconnection margin
+    on top of turnkey, and a US-tariff cushion.
+
+    LEARNING DRIVER (v5.8): the Wright's-Law driver is **global Li-ion cell
+    production (EV + stationary)** — the actual driver of LFP cell cost — not
+    stationary BESS alone. Cumulative ≈5,000 GWh produced through 2025,
+    ≈1,600 GWh added in 2025 (IEA Global EV Outlook / BNEF). Pre-v5.8 the
+    figures (1,800 / 600 GWh) matched neither basis.
     """
     name: str = "LFP Battery"
-    capex_kwh_today: float = 180.0   # energy component, $/kWh (global commodity)
-    capex_kw_today: float  = 140.0   # power/BOS/EPC component, $/kW (regional)
+    capex_kwh_today: float = 90.0    # energy component, $/kWh (global commodity)
+    capex_kw_today: float  = 160.0   # power/BOS/EPC component, $/kW (regional)
     learning_rate: float = 0.19
-    cumulative_gwh_2025: float = 1800.0
-    annual_additions_gwh: float = 600.0
+    cumulative_gwh_2025: float = 5000.0
+    annual_additions_gwh: float = 1600.0
     additions_growth_rate: float = 0.18
     additions_growth_decay: float = 1.0   # v5.7 S-curve decay (1.0 = legacy constant growth)
     additions_growth_floor: float = 0.0
@@ -91,18 +100,35 @@ class BatteryParams:
 
 @dataclass
 class GasParams:
-    """Gas backup: CCGT/OCGT, fuel, carbon trajectory."""
+    """Gas backup: CCGT/OCGT, fuel, carbon trajectory.
+
+    CAPEX (v5.8): recalibrated to the post-2024 turbine-shortage market. New
+    CCGT orders placed today run $2,000–2,500/kW with ~2030 delivery slots
+    (GridLab 2025; EIA AEO2025 capital-cost study); only plants already in the
+    2026–27 completion pipeline still see the old $1,100–1,400/kW. Simple-cycle
+    CTs entering service in 2025 ran $728–1,544/kW. Since a datacenter deciding
+    *today* buys at today's prices, the defaults take the order-book values
+    (CCGT $2,000, OCGT $1,000); the pre-v5.8 Lazard-v17-era $1,100/$500 are
+    recoverable as an explicit override for a pre-shortage sensitivity.
+
+    CARBON INTENSITY (v5.8): combustion-only stack emissions — 53.07 kgCO₂/MMBtu
+    (EPA/IPCC) × heat rate — because the model multiplies it by the EU-ETS-style
+    carbon price, whose scope is stack CO₂ only. CCGT 6.5 MMBtu/MWh → 0.345,
+    OCGT 9.5 → 0.50 tCO₂/MWh. (The pre-v5.8 0.41/0.60 mixed in some upstream
+    methane, implicitly charging non-ETS emissions at the ETS price; lifecycle
+    accounting would be ~0.49/0.65 but needs its own price basis.)
+    """
     name: str = "Gas Backup"
-    ccgt_capex_kw: float   = 1100.0
-    ocgt_capex_kw: float   = 500.0
+    ccgt_capex_kw: float   = 2000.0
+    ocgt_capex_kw: float   = 1000.0
     ccgt_fom_kw_yr: float  = 15.0
     ocgt_fom_kw_yr: float  = 10.0
     gas_price_mmbtu: float = 4.0
     ccgt_heat_rate: float  = 6.5    # MMBtu/MWh
     ocgt_heat_rate: float  = 9.5
     vom_mwh: float = 3.0
-    carbon_intensity_ccgt: float = 0.41  # tCO2/MWh (IPCC AR6)
-    carbon_intensity_ocgt: float = 0.60
+    carbon_intensity_ccgt: float = 0.345  # tCO2/MWh, combustion-only (ETS scope)
+    carbon_intensity_ocgt: float = 0.50
     carbon_price_today: float = 0.0
     # Trajectory mode: "linear" | "logistic" | "step"
     carbon_trajectory: str = "linear"
@@ -117,8 +143,11 @@ class GasParams:
 
 @dataclass
 class SMRParams:
+    # FOAK (v5.8): $150/MWh — recent FOAK datapoints (NuScale/UAMPS implied
+    # ~$120+ in 2023$ before cancellation; GE-Hitachi Darlington capex) sit well
+    # above the old $120. NOAK $85 is the standard industry target (σ=0.25).
     name: str = "SMR (Nuclear)"
-    lcoe_foak: float = 120.0
+    lcoe_foak: float = 150.0
     lcoe_noak: float = 85.0
     years_to_noak: int = 10
     uncertainty_sigma: float = 0.25
@@ -151,7 +180,7 @@ class GridPPAParams:
     reference lines, never part of the optimisation.
     """
     name: str = "Grid + RE PPA"
-    ppa_energy_today: float = 45.0     # $/MWh contracted RE energy (LevelTen index, US)
+    ppa_energy_today: float = 55.0     # $/MWh contracted RE energy (LevelTen index 2025, US)
     grid_delivery_mwh: float = 22.0    # $/MWh T&D / network charge, large C&I
     firming_premium_mwh: float = 8.0   # $/MWh balancing/standby to firm PPA to 24/7
     cfe_premium_mwh: float = 40.0      # $/MWh extra for 24/7 hourly CFE vs annual matching
@@ -236,6 +265,11 @@ class SystemParams:
     # reduces exactly to the single-site generator, so it leaves the headline unchanged.
     n_sites: int = 1               # number of geographically-separated generation sites
     site_synoptic_corr: float = 0.7  # pairwise cross-site correlation of the Dunkelflaute factor
+    # v5.9: cross-site correlation of the LOCAL residuals (cloud texture, wind innovation).
+    # Pre-v5.9 these were fully independent per site, overstating diversification (effective
+    # daily cross-site corr only λ²·c ≈ 0.18); 0.4 is the literature mid-range for
+    # intra-region (100–300 km) sites. 0.0 recovers the v5.8 behaviour.
+    site_local_corr: float = 0.4
     # Datacenter load shape (mean-normalised to 1.0, so "per MW of average load").
     # "flat" = constant load (default, reduces dispatch exactly to the headline model);
     # "cooling" adds a temperature-driven PUE overhead so peak load > average and firm
@@ -282,9 +316,11 @@ WORKLOAD_PRESETS = {
 
 # ── Technology defaults ───────────────────────────────────────────────────────
 
-# CF-CONSISTENCY (v5.5). `lcoe_today` is the Lazard LCOE+ v18 mid-range, which is
-# levelised at Lazard's own capacity-factor assumptions (utility solar 20–30%,
-# onshore wind 30–55%). An LCOE is capex+FOM spread over a *specific* CF, so the
+# CF-CONSISTENCY (v5.5). `lcoe_today` is the Lazard LCOE+ mid-range (v5.8: the June
+# 2025 edition — utility solar $38–78 mid ≈$58, onshore wind $37–86 mid ≈$61; the
+# solar 52 sits just below mid, wind takes the mid), which is levelised at Lazard's
+# own capacity-factor assumptions (utility solar 20–30%, onshore wind 30–55%). An
+# LCOE is capex+FOM spread over a *specific* CF, so the
 # dispatch must simulate that same CF or the cost basis is internally inconsistent.
 # The default resource + weather (after the v5.5 solar cloud-double-count fix and the
 # modern wind power curve) reproduce US solar ≈0.23 / wind ≈0.33 and EU solar ≈0.16 /
@@ -295,27 +331,40 @@ WORKLOAD_PRESETS = {
 # growth rate (S-curve), not constant compounding. The central path is a best guess that
 # keeps near-term additions robust — driven by developing-world electrification and the
 # AI-datacenter clean-power buildout — but lets growth taper as mature markets saturate
-# and grid-integration limits bite. It lands solar ≈15.6 TW, wind ≈4.2 TW, batteries
-# ≈14.5 TWh cumulative by 2040 (vs the old constant-growth 38 TW / 7 TW / 45 TWh, which
-# were ~3-4× mainstream IEA WEO / BNEF NEO and pulled deep-future RE cost down too fast).
+# and grid-integration limits bite. It lands solar ≈15.6 TW, wind ≈4.2 TW cumulative by
+# 2040, and Li-ion production (the v5.8 battery learning driver, EV + stationary)
+# ≈39 TWh cumulative (vs the old constant-growth paths, which were ~3-4× mainstream
+# IEA WEO / BNEF NEO and pulled deep-future RE cost down too fast).
 # decay/floor are documented in §3; a low/central/high band is tabulated there too.
-SOLAR = TechParams("Solar PV", lcoe_today=52.0, learning_rate=0.30,
+# SOLAR learning rate (v5.8): 0.30 → 0.25. Historic module-price LR is ~20–24%
+# (ITRPV); system-level LCOE learning (incl. BOS/soft costs, which learn slower)
+# is commonly estimated 20–25%. 0.30 was the aggressive end of the literature
+# (Way et al. 2022 hardware-only); 0.25 is the defensible central.
+SOLAR = TechParams("Solar PV", lcoe_today=52.0, learning_rate=0.25,
                    cumulative_gw_2025=2900.0, annual_additions_gw=650.0,
                    additions_growth_rate=0.06, additions_growth_decay=0.85,
                    om_frac_lcoe=0.15)
 
-WIND = TechParams("Onshore Wind", lcoe_today=50.0, learning_rate=0.17,
+# WIND (v5.8): lcoe_today 50 → 61, the Lazard LCOE+ 2025 mid (range $37–86/MWh —
+# US onshore wind costs ROSE on supply-chain/tariff inflation; the 2024 edition's
+# $27–73 mid $50 is stale). Cumulative basis: the TOTAL installed wind fleet
+# (on- + offshore, shared supply chain) — 1,299 GW end-2025, 165 GW added in 2025
+# (GWEC Global Wind Report 2026), which the 1,300/167 below match.
+WIND = TechParams("Onshore Wind", lcoe_today=61.0, learning_rate=0.17,
                   cumulative_gw_2025=1300.0, annual_additions_gw=167.0,
                   additions_growth_rate=0.03, additions_growth_decay=0.85,
                   om_frac_lcoe=0.25, life_yr=25)
 
-# Energy component identical across regions (globally traded LFP cells); EU
-# carries a ~25% power/BOS/EPC soft-cost premium (higher labour/permitting, no
-# IRA-equivalent manufacturing credit). EU is therefore modestly MORE expensive
-# than the US — the opposite of the v4 assumption.
-BATTERY_US = BatteryParams("LFP Battery (US)", capex_kwh_today=180.0, capex_kw_today=140.0,
+# Energy component identical across regions (globally traded LFP cells); the
+# regional power/BOS/EPC premium now sits on the US (v5.8), not the EU: BNEF's
+# 2025 cost survey has US 4h turnkey ≈ $108/kWh vs EU ≈ $101 — Section 301
+# tariffs on Chinese cells outweigh the EU's labour/permitting costs. (This
+# reverses the v5–v5.7 assumption of an EU premium, itself a reversal of v4.)
+# US 4h ≈ (4·90+160)/4 = $130/kWh installed; EU ≈ $120/kWh — both a soft-cost/
+# interconnection margin above BNEF turnkey.
+BATTERY_US = BatteryParams("LFP Battery (US)", capex_kwh_today=90.0, capex_kw_today=160.0,
                            additions_growth_rate=0.08, additions_growth_decay=0.85)
-BATTERY_EU = BatteryParams("LFP Battery (EU)", capex_kwh_today=180.0, capex_kw_today=175.0,
+BATTERY_EU = BatteryParams("LFP Battery (EU)", capex_kwh_today=90.0, capex_kw_today=120.0,
                            additions_growth_rate=0.08, additions_growth_decay=0.85)
 
 GAS = GasParams(name="Gas Backup (US)", gas_price_mmbtu=4.0,
@@ -342,8 +391,8 @@ GAS_EU = GasParams(
 GAS_H2 = GasParams(
     name="Green H2 firming (purchased)",
     gas_price_mmbtu=46.0,          # Lazard LCOH v4.0: $5.25/kg unsubsidized ÷ 8.8 kg/MMBtu
-    ccgt_capex_kw=1300.0,          # H2-ready turbine + H2 handling (vs 1100 NG, Lazard v17)
-    ocgt_capex_kw=600.0,           # (vs 500 NG)
+    ccgt_capex_kw=2200.0,          # H2-ready turbine + H2 handling (vs 2000 NG, v5.8 basis)
+    ocgt_capex_kw=1100.0,          # (vs 1000 NG)
     carbon_price_today=0.0,
     carbon_trajectory="linear",
     carbon_intensity_ccgt=0.0,     # green H2 → no combustion CO2
@@ -479,17 +528,19 @@ LDES_PRESETS = {"iron-air": LDES_IRONAIR, "h2": LDES_H2, "h2-cavern": LDES_H2_CA
                 "phs": LDES_PHS}
 
 
-SOLAR_EU = TechParams("Solar PV (EU)", lcoe_today=60.0, learning_rate=0.30,
+SOLAR_EU = TechParams("Solar PV (EU)", lcoe_today=60.0, learning_rate=0.25,
                       cumulative_gw_2025=2900.0, annual_additions_gw=650.0,
                       additions_growth_rate=0.06, additions_growth_decay=0.85,
                       om_frac_lcoe=0.15)
-WIND_EU  = TechParams("Onshore Wind (EU)", lcoe_today=48.0, learning_rate=0.17,
+# EU wind (v5.8): 48 → 56, ~8% below the US 61 — European onshore auctions/LCOE
+# (€55–70/MWh) were largely spared the US tariff-driven cost inflation.
+WIND_EU  = TechParams("Onshore Wind (EU)", lcoe_today=56.0, learning_rate=0.17,
                       cumulative_gw_2025=1300.0, annual_additions_gw=167.0,
                       additions_growth_rate=0.03, additions_growth_decay=0.85,
                       om_frac_lcoe=0.25, life_yr=25)
 
 SMR    = SMRParams()
-SMR_EU = SMRParams(name="SMR (EU)", lcoe_foak=140.0, lcoe_noak=85.0, years_to_noak=12)
+SMR_EU = SMRParams(name="SMR (EU)", lcoe_foak=175.0, lcoe_noak=85.0, years_to_noak=12)
 
 # Grid + renewable-PPA reference. EU energy & network charges run higher than the
 # US (pricier PPAs, higher network tariffs), mirroring the off-grid cost gap.

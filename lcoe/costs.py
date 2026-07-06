@@ -58,9 +58,18 @@ def crf(r: float, n: int) -> float:
     return r * (1 + r) ** n / ((1 + r) ** n - 1)
 
 
-# The flat WACC at which the exogenous generation LCOEs (Lazard v18 etc.) are taken
+# The flat WACC at which the exogenous generation LCOEs (Lazard LCOE+ etc.) are taken
 # to be quoted. `rewacc_lcoe` re-expresses a bundled LCOE at a technology's own WACC.
-LEGACY_WACC = 0.07
+#
+# REAL-TERMS CONVENTION (v5.8). The model works in constant 2025 dollars, so every
+# WACC in it — this one and the per-technology `wacc` fields — is a REAL rate.
+# Lazard levelises at ≈7.7% NOMINAL after-tax WACC; at ~2.2% inflation that is
+# ≈5.5% real. The pre-v5.8 value (0.07) treated Lazard's nominal rate as if it were
+# real, so `rewacc_lcoe` then granted RE a ~12% "cheaper capital" discount that was
+# actually just inflation counted twice. At 0.055 the default solar/wind WACC
+# (5.5% real ≈ Lazard's basis) makes `rewacc_lcoe` the identity — the lever still
+# works for genuinely cheaper (hyperscaler-backed) or dearer capital.
+LEGACY_WACC = 0.055
 
 
 def rewacc_lcoe(lcoe, tech: TechParams):
@@ -276,7 +285,11 @@ def _gas_plant_params(gas_frac: float, gas: GasParams, year_index: int, r: float
     cf    = max(gas_frac, 1e-9)
     crf_g = crf(r, gas.lifetime_years)
     p_c   = carbon_price(gas, year_index)
-    cap_backup = float(np.clip(gas_peak, 0.05, 1.0))
+    # Upper clip must admit peaks ABOVE average load (a peaky cooling profile
+    # produces gas_peak ≈ 1.2× mean load, and the firm plant is sized to that
+    # peak — §5.7). The pre-v5.8 clip at 1.0 silently voided the documented
+    # cooling-profile gas upsizing; 2.0 is a sanity bound, not a size cap.
+    cap_backup = float(np.clip(gas_peak, 0.05, 2.0))
     if gas_frac >= 0.20:   # CCGT
         return (cf, crf_g, p_c, cap_backup, gas.ccgt_capex_kw, gas.ccgt_fom_kw_yr,
                 gas.ccgt_heat_rate, gas.carbon_intensity_ccgt)

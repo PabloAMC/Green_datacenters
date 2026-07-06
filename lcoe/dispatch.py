@@ -85,24 +85,36 @@ class ChronologicalSimulator:
         (self.gas_mean, self.gas_p90, self.fec_mean, self.gas_peak_mean,
          self.gas_peak_firm_mean, self.drop_mean,
          self.sol_cf_mean, self.win_cf_mean,
-         self.gas_peak_firm_p90) = self._run_mc(seed)
+         self.gas_peak_firm_p90,
+         self.drop_p90, self.gas_peak_p90, self.gas_firm_p90) = self._run_mc(seed)
         print("  [Sim] Done.")
 
     def _dispatch_one_year(self, sol_tr: np.ndarray,
-                            win_tr: np.ndarray) -> Tuple[np.ndarray, np.ndarray,
-                                                         np.ndarray, np.ndarray,
-                                                         float, float]:
+                            win_tr: np.ndarray,
+                            scen=None) -> Tuple[np.ndarray, np.ndarray,
+                                                np.ndarray, np.ndarray,
+                                                float, float]:
         """
         Vectorised combined dispatch for all (C_sol, C_win, B) scenarios.
         Both sources feed the same load; battery arbitrates between them.
         Flexibility = SHEDDING (v5.2): up to `interruptible_fraction` of each
         deficit hour's load may be dropped (no recovery).
         Returns gas_frac, fec_daily, gas_peak, drop_frac (each ns^3,), cf_sol, cf_win.
+
+        `scen` (v5.9): optional (cs, cw, batt_pow, soc_max) scenario-vector override
+        — used by `exact_point` to dispatch ONE build across all weather years at
+        once (the years become the vector axis; `sol_tr`/`win_tr` are then (N, 8760)
+        per-"scenario" traces). None → the precomputed ns³ grid (unchanged).
         """
         eta_chg = self.batt.roundtrip_efficiency ** 0.5
         eta_dis = self.batt.roundtrip_efficiency ** 0.5
         flex    = self.workload.interruptible_fraction   # max sheddable share / hour
-        n       = len(self._cs)
+        if scen is None:
+            cs, cw, batt_pow, soc_max = self._cs, self._cw, self._batt_pow, self._soc_max
+        else:
+            cs, cw, batt_pow, soc_max = scen
+        n = len(cs)
+        per_scen = sol_tr.ndim == 2   # (n, 8760) per-scenario traces (exact_point)
 
         soc = np.zeros(n); gas = np.zeros(n); drop = np.zeros(n)
         dis_sum = np.zeros(n)         # annual cell discharge throughput (for EFC)
@@ -111,14 +123,16 @@ class ChronologicalSimulator:
 
         load = self.load
         for t in range(8760):
-            g = self._cs * sol_tr[t] + self._cw * win_tr[t]
+            s_t = sol_tr[:, t] if per_scen else sol_tr[t]
+            w_t = win_tr[:, t] if per_scen else win_tr[t]
+            g = cs * s_t + cw * w_t
             net     = g - load[t]          # load[t]=1.0 for the flat (default) profile
             deficit = np.maximum(-net, 0.0)
             surplus = np.maximum(net, 0.0)
 
             # ── Deficit side ──────────────────────────────────────────────────
             # 1. Discharge battery
-            dis = np.minimum(np.minimum(soc * eta_dis, self._batt_pow), deficit)
+            dis = np.minimum(np.minimum(soc * eta_dis, batt_pow), deficit)
             soc -= dis / eta_dis;  deficit -= dis
             dis_sum += dis                                       # accumulate throughput
             gas_peak_firm = np.maximum(gas_peak_firm, deficit)  # pre-shed (firm)
@@ -137,8 +151,8 @@ class ChronologicalSimulator:
 
             # ── Surplus side ──────────────────────────────────────────────────
             # 4. Charge battery with surplus (anything left is curtailed).
-            chg = np.minimum(np.minimum((self._soc_max - soc) / eta_chg,
-                                         self._batt_pow), surplus)
+            chg = np.minimum(np.minimum((soc_max - soc) / eta_chg,
+                                         batt_pow), surplus)
             soc += chg * eta_chg
 
         # Throughput-based equivalent full cycles (v5.4): annual cell-discharge
@@ -147,9 +161,9 @@ class ChronologicalSimulator:
         # with Wöhler/DoD weighting is the further refinement; throughput EFCs are
         # the widely-used proxy and are exact for symmetric daily cycling.)
         with np.errstate(divide='ignore', invalid='ignore'):
-            efc_year = np.where(self._soc_max > 0,
+            efc_year = np.where(soc_max > 0,
                                 (dis_sum / eta_dis)
-                                / np.where(self._soc_max > 0, self._soc_max, 1.0),
+                                / np.where(soc_max > 0, soc_max, 1.0),
                                 0.0)
         fec_daily = efc_year / 365.0
 
@@ -168,6 +182,7 @@ class ChronologicalSimulator:
         all_gas_peak_firm = np.zeros((N,) + sh)
         all_drop = np.zeros((N,) + sh)
         cf_s_list, cf_w_list = [], []
+        traces = []
 
         for i in range(N):
             if self.weather_years is not None:
@@ -181,6 +196,7 @@ class ChronologicalSimulator:
                     self.clearsky, self.mean_wind, rng,
                     n_sites=self.sys.n_sites,
                     site_synoptic_corr=self.sys.site_synoptic_corr,
+                    site_local_corr=getattr(self.sys, "site_local_corr", 0.4),
                     wind_solar_corr=self.sys.wind_solar_corr,
                     syn_loading=self.sys.syn_loading,
                     syn_persistence=self.sys.syn_persistence,
@@ -194,12 +210,63 @@ class ChronologicalSimulator:
             all_gas[i] = gas_f;  all_fec[i] = fec_d; all_gas_peak[i] = gas_p
             all_gas_peak_firm[i] = gas_pf; all_drop[i] = drop_f
             cf_s_list.append(cf_s);  cf_w_list.append(cf_w)
+            traces.append((sol_tr, win_tr))
+
+        # Keep the weather (v5.9) so `exact_point` can re-dispatch the FINAL optimum
+        # exactly (no interpolation) — ~7 MB at 50 years, regenerating would be slower.
+        self._traces_s = np.stack([s for s, _ in traces])
+        self._traces_w = np.stack([w for _, w in traces])
+        self._exact_cache = {}
 
         return (all_gas.mean(0), np.percentile(all_gas, 90, axis=0),
                 all_fec.mean(0), all_gas_peak.mean(0), all_gas_peak_firm.mean(0),
                 all_drop.mean(0),
                 float(np.mean(cf_s_list)), float(np.mean(cf_w_list)),
-                np.percentile(all_gas_peak_firm, 90, axis=0))
+                np.percentile(all_gas_peak_firm, 90, axis=0),
+                # v5.9.1 P90 coherence: the shed-branch P90 surfaces, and the FIRM
+                # gas-energy P90 taken on the per-year SUM gas+drop (a coherent
+                # year-percentile, not P90(gas)+mean(drop)).
+                np.percentile(all_drop, 90, axis=0),
+                np.percentile(all_gas_peak, 90, axis=0),
+                np.percentile(all_gas + all_drop, 90, axis=0))
+
+    def exact_point(self, C_sol: float, C_win: float, B: float) -> dict:
+        """
+        EXACT MC dispatch statistics at one (C_sol, C_win, B) — no interpolation
+        (v5.9). Re-runs the stored weather years through the same dispatch waterfall
+        with the years as the vector axis, so the final reported optimum is confirmed
+        on true dispatch rather than read off the trilinear surface (whose convexity
+        bias overstates gas between grid nodes; §8.4/§12). Cached per point.
+
+        Returns the same statistics as the precomputed surfaces:
+        {gas_mean, gas_p90, fec_mean, gas_peak_mean, gas_peak_firm_mean,
+         gas_peak_firm_p90, drop_mean}.
+        """
+        key = (round(float(C_sol), 9), round(float(C_win), 9), round(float(B), 9))
+        hit = self._exact_cache.get(key)
+        if hit is not None:
+            return hit
+        N = self._traces_s.shape[0]
+        B = float(B)
+        bp = 0.0 if B <= 0 else (1.0 if B <= 4.0 else min(1.0, 4.0 / B))
+        scen = (np.full(N, float(C_sol)), np.full(N, float(C_win)),
+                np.full(N, bp), np.full(N, B))
+        gas_f, fec_d, gas_p, gas_pf, drop_f, _, _ = self._dispatch_one_year(
+            self._traces_s, self._traces_w, scen=scen)
+        out = {
+            "gas_mean": float(gas_f.mean()),
+            "gas_p90": float(np.percentile(gas_f, 90)),
+            "fec_mean": float(fec_d.mean()),
+            "gas_peak_mean": float(gas_p.mean()),
+            "gas_peak_firm_mean": float(gas_pf.mean()),
+            "gas_peak_firm_p90": float(np.percentile(gas_pf, 90)),
+            "drop_mean": float(drop_f.mean()),
+            "drop_p90": float(np.percentile(drop_f, 90)),
+            "gas_peak_p90": float(np.percentile(gas_p, 90)),
+            "gas_firm_p90": float(np.percentile(gas_f + drop_f, 90)),
+        }
+        self._exact_cache[key] = out
+        return out
 
     def interp3(self, surface: np.ndarray, C_sol: float,
                 C_win: float, B: float) -> float:
@@ -275,7 +342,11 @@ def dispatch_ldes_overlay(clearsky, mean_wind, rng, weather_kwargs,
     soc_ldes_max = B_ldes       # MWh per MW-load
 
     for _ in range(int(n_mc)):
-        sol, win = generate_weather_year(clearsky, mean_wind, rng, **weather_kwargs)
+        # v5.9.1: portfolio seam (n_sites=1 reduces exactly to the single-site
+        # generator), so the LDES overlay sees the same diversified weather as
+        # the main path when a multi-site config is in use.
+        sol, win = generate_weather_portfolio(clearsky, mean_wind, rng,
+                                              **weather_kwargs)
         soc_lfp = 0.0
         soc_ld = np.zeros(K)
         gas = np.zeros(K); peak = np.zeros(K); ldes_dis = np.zeros(K)

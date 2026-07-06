@@ -116,13 +116,16 @@ def solar_clearsky(mean_irr_kwh_m2_day: float, performance_ratio: float = 1.0) -
     raw = diurnal * seasonal
     # Pre-divide by the cloud mean so that E[clear-sky × cloud] = mean_irr/24 · PR.
     target_cf = mean_irr_kwh_m2_day / 24.0 * performance_ratio / CLOUD_MEAN
-    # Iterate once to absorb the (small) clip at 1.0 of summer-noon hours, so the
-    # *clipped* trace still carries the intended mean rather than losing the peaks.
+    # Renormalise to ABSORB the clip at 1.0 of summer-noon hours, iterating to
+    # convergence so the *clipped* trace carries the intended mean exactly. (v5.9:
+    # the fixed 3-pass loop converged from below and left sunny-site means ~1% short
+    # — e.g. US effective CF 0.227 vs the 0.229 anchor; EU, where the clip doesn't
+    # bind, was already exact.)
     cs = raw * (target_cf / raw.mean() if raw.mean() > 0 else 1.0)
-    for _ in range(3):
+    for _ in range(200):
         clipped = np.clip(cs, 0.0, 1.0)
         m = clipped.mean()
-        if m <= 0:
+        if m <= 0 or abs(m - target_cf) <= 1e-9 * target_cf:
             break
         cs = cs * (target_cf / m)
     return np.clip(cs, 0.0, 1.0)
@@ -143,6 +146,8 @@ def generate_weather_year(
     wind_v_rated: float = 11.0,
     wind_v_cutout: float = 25.0,
     synoptic_f: "Optional[np.ndarray]" = None,
+    cloud_resid: "Optional[np.ndarray]" = None,
+    wind_resid: "Optional[np.ndarray]" = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Synthetic 8760h solar + wind capacity factors with (v5) a persistent
@@ -151,26 +156,42 @@ def generate_weather_year(
     Daily latent structure — a two-factor Gaussian model at the daily scale:
 
         f_d         : common synoptic factor, AR(1) with persistence φ
-        z1_d = λ·f_d + √(1-λ²)·g1_d   → drives cloud (Beta(3,1.5) marginal)
+        h_d         : local cloud residual, AR(1) with persistence ρ_c (v5.9)
+        z1_d = λ·f_d + √(1-λ²)·h_d    → drives cloud (Beta(3,1.5) marginal)
         z2_d = λ·f_d + √(1-λ²)·g2_d   → drives wind  (Weibull(k=2.1) marginal)
 
-    where (g1_d, g2_d) are contemporaneous bivariate-normal with correlation
+    where g2_d = ρ_g·h_d + √(1-ρ_g²)·w_d with
         ρ_g = (ρ - λ²) / (1 - λ²)
     chosen so corr(z1_d, z2_d) = ρ (the requested contemporaneous coupling)
     while BOTH variables load positively on the persistent f_d. Hence:
 
       • f_d ≪ 0 for several days  →  low z1 AND low z2  →  joint multi-day
         low-sun-and-low-wind episode (Dunkelflaute);
-      • the residual (g1,g2) carries the cyclonic ρ<0 ("windy when overcast")
+      • the residual (h,g2) carries the cyclonic ρ<0 ("windy when overcast")
         on top of the synoptic mode.
 
-    Because z1_d, z2_d remain *standard normal*, the Beta and Weibull marginals
-    — and therefore the annual-mean capacity factors — are preserved exactly;
-    only the temporal clustering of lows changes (what storage/backup must cover).
+    v5.9 — persistence moved into z-space. Through v5.8 the short-scale cloud
+    persistence was an AR filter applied AFTER the Beta transform, which (a) shrank
+    the cloud variance ~40% (deep-overcast days ≈1.3% vs the Beta marginal's 5.2%)
+    and (b) diluted/positively-biased the realized wind-solar correlation to ≈half
+    the configured ρ. Carrying ρ_c inside the *latent* h_d (stationary AR(1),
+    unit variance) keeps z1_d ~ N(0,1) exactly, so the Beta marginal — and the
+    realized corr(z1,z2)=ρ — hold by construction; day-to-day cloud persistence is
+    λ²φ + (1−λ²)ρ_c (synoptic + local terms).
+
+    v5.9 — mid-summer seam. The daily latent series (z1, z2) are rolled 182 days
+    so the AR(1) chain start/end seam falls in early July: the winter half-year —
+    where Dunkelflaute risk lives — is one contiguous stretch of the chain, and a
+    lull spanning the calendar year boundary (Dec→Jan) is fully represented
+    instead of being severed at Jan 1. The stochastic processes are seasonless
+    (stationary), so rolling them leaves all distributions unchanged; calendar
+    seasonality (clear-sky, winter wind amplification) stays calendar-aligned.
 
     `synoptic_f`, if given, is a precomputed daily synoptic factor (365,) used INSTEAD
     of generating one internally — the seam the spatial-diversification portfolio uses
-    to *share* a regional Dunkelflaute factor across sites (see `generate_weather_portfolio`).
+    to *share* a regional Dunkelflaute factor across sites. `cloud_resid` (an AR(1)(ρ_c)
+    unit-variance chain) and `wind_resid` (iid N(0,1), both (365,)) are the analogous
+    seams for the LOCAL residuals h_d and w_d (v5.9, `site_local_corr`).
     """
     rho = float(np.clip(wind_solar_corr, -0.999, 0.999))
     lam = float(np.clip(syn_loading, 0.0, math.sqrt(max((rho + 1.0) / 2.0, 0.0)) - 1e-6))
@@ -180,31 +201,32 @@ def generate_weather_year(
     # Shared across sites when supplied (spatial diversification); else generated here.
     f = _ar1_series(phi, 365, rng) if synoptic_f is None else np.asarray(synoptic_f, float)
 
-    # Residual contemporaneous pair (g1,g2): corr ρ_g so net corr(z1,z2)=ρ.
+    # Local residuals: h (cloud, AR(1)(ρ_c) stationary unit variance — v5.9) and the
+    # wind innovation w (iid). corr(z1,z2)=ρ via g2 = ρ_g·h + √(1-ρ_g²)·w.
     one_m = 1.0 - lam ** 2
     rho_g = float(np.clip((rho - lam ** 2) / one_m if one_m > 1e-9 else 0.0,
                           -0.999, 0.999))
-    g1 = rng.standard_normal(365)
-    g2 = rho_g * g1 + math.sqrt(max(1 - rho_g ** 2, 0)) * rng.standard_normal(365)
+    h = (_ar1_series(float(np.clip(cloud_ar1, 0.0, 0.999)), 365, rng)
+         if cloud_resid is None else np.asarray(cloud_resid, float))
+    w = rng.standard_normal(365) if wind_resid is None else np.asarray(wind_resid, float)
+    g2 = rho_g * h + math.sqrt(max(1 - rho_g ** 2, 0)) * w
 
-    z1 = lam * f + math.sqrt(one_m) * g1   # → cloud,  Var=1
+    z1 = lam * f + math.sqrt(one_m) * h    # → cloud,  Var=1, day-to-day corr λ²φ+(1-λ²)ρ_c
     z2 = lam * f + math.sqrt(one_m) * g2   # → wind,   Var=1
 
-    # Cloud factor: Beta(α, β) marginal via probability integral transform
-    u_cloud = np.clip(ndtr(z1), 1e-6, 1 - 1e-6)
-    daily_raw = betaincinv(CLOUD_BETA_A, CLOUD_BETA_B, u_cloud)
+    # Mid-summer seam (v5.9): winter contiguous, AR chain seam in early July.
+    z1 = np.roll(z1, 182)
+    z2 = np.roll(z2, 182)
 
     # Wind: Weibull(k=2.1) marginal
     k = 2.1
     c = mean_wind_ms / math.gamma(1 + 1 / k)
 
     # ── Solar ─────────────────────────────────────────────────────────────────
-    # Short-scale cloud autocorrelation on top of the synoptic persistence in z1.
-    rho_c = cloud_ar1
-    daily_cloud = np.empty(365)
-    daily_cloud[0] = daily_raw[0]
-    for d in range(1, 365):
-        daily_cloud[d] = rho_c * daily_cloud[d - 1] + (1 - rho_c) * daily_raw[d]
+    # Cloud factor: Beta(α, β) marginal via probability integral transform — exact
+    # every day (v5.9: no post-transform filtering; persistence lives in z1).
+    u_cloud = np.clip(ndtr(z1), 1e-6, 1 - 1e-6)
+    daily_cloud = betaincinv(CLOUD_BETA_A, CLOUD_BETA_B, u_cloud)
     solar = np.clip(clearsky * np.repeat(np.clip(daily_cloud, 0, 1), 24), 0, 1)
 
     # ── Wind: hourly AR(1) that MEAN-REVERTS to the persistent daily level ──────
@@ -259,6 +281,7 @@ def generate_weather_portfolio(
     rng: np.random.Generator,
     n_sites: int = 1,
     site_synoptic_corr: float = 0.7,
+    site_local_corr: float = 0.4,
     syn_persistence: float = 0.82,
     **kwargs,
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -279,14 +302,22 @@ def generate_weather_portfolio(
     Model. All sites share one regional synoptic factor `f_common` (AR(1), persistence
     φ); each site's factor is `f_i = √c·f_common + √(1−c)·f_i^indep`, so any two sites
     have synoptic correlation `c = site_synoptic_corr` while each `f_i` keeps the same
-    AR(1)(φ) law (hence each site's marginals/CF are individually unchanged). Local cloud
-    and wind residuals are drawn independently per site. `n_sites=1` reduces **exactly**
-    to `generate_weather_year` (identical draw order), so it leaves the default model and
-    all published numbers untouched.
+    AR(1)(φ) law (hence each site's marginals/CF are individually unchanged).
+
+    v5.9 — shared LOCAL weather. Through v5.8 the local cloud/wind residuals were fully
+    independent per site, so the effective cross-site daily correlation was only λ²·c
+    (≈0.18 at defaults) — real intra-region sites (100–300 km apart) also share local
+    weather (observed daily cross-correlations ~0.3–0.6), so the portfolio *overstated*
+    diversification. The local residuals are now mixed the same way as the synoptic
+    factor, with `site_local_corr` (default 0.4, the literature mid-range):
+    `h_i = √cl·h_common + √(1−cl)·h_i^own` (cloud, AR(1)(ρ_c) preserved) and likewise
+    for the wind innovation — giving a total cross-site latent correlation of
+    λ²c + (1−λ²)·cl per day. Set `site_local_corr=0` to recover the v5.8 behaviour.
+    `n_sites=1` reduces **exactly** to `generate_weather_year` (identical draw order),
+    so it leaves the default model and all published numbers untouched.
 
     `c→1` ⇒ fully coincident sites ⇒ no smoothing; `c→0` ⇒ independent sites ⇒ maximal
-    smoothing (optimistic — real intra-region sites are strongly coupled, so the default
-    c=0.7 is deliberately conservative about how much diversification actually helps).
+    smoothing (optimistic — real intra-region sites are strongly coupled).
     """
     n = max(int(n_sites), 1)
     if n == 1:
@@ -295,15 +326,23 @@ def generate_weather_portfolio(
 
     phi = float(np.clip(syn_persistence, 0.0, 0.999))
     c = float(np.clip(site_synoptic_corr, 0.0, 1.0))
+    cl = float(np.clip(site_local_corr, 0.0, 1.0))
     a, b = math.sqrt(c), math.sqrt(1.0 - c)
+    al, bl = math.sqrt(cl), math.sqrt(1.0 - cl)
+    rho_c = float(np.clip(kwargs.get("cloud_ar1", 0.35), 0.0, 0.999))
     f_common = _ar1_series(phi, 365, rng)
+    h_common = _ar1_series(rho_c, 365, rng)
+    w_common = rng.standard_normal(365)
 
     sol_acc = np.zeros(8760)
     win_acc = np.zeros(8760)
     for _ in range(n):
         f_site = a * f_common + b * _ar1_series(phi, 365, rng)
+        h_site = al * h_common + bl * _ar1_series(rho_c, 365, rng)
+        w_site = al * w_common + bl * rng.standard_normal(365)
         s, w = generate_weather_year(clearsky, mean_wind_ms, rng,
-                                     syn_persistence=phi, synoptic_f=f_site, **kwargs)
+                                     syn_persistence=phi, synoptic_f=f_site,
+                                     cloud_resid=h_site, wind_resid=w_site, **kwargs)
         sol_acc += s
         win_acc += w
     return sol_acc / n, win_acc / n
