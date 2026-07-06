@@ -12,7 +12,7 @@ help:
 	@echo "  reproduce     regenerate all figures + output/ JSON/CSV from scratch (firm suite)"
 	@echo "  tables        print the §11 doc tables from output/ (paste-ready)"
 	@echo "  locations     compute the cross-location comparison figure (EU countries / US states)"
-	@echo "  report        build the GitHub Pages site (docs/index.html) from output/ + figs"
+	@echo "  report        build the GitHub Pages site (docs/*.html) from output/ + figs"
 	@echo "  check-docs    fail if the committed doc tables drift from output/"
 	@echo "  check         test + check-docs (what CI runs)"
 	@echo "  clean         remove generated figures, CLI outputs, caches"
