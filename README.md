@@ -6,7 +6,7 @@
 
 An optimization model that finds the least-cost combination of solar PV, onshore wind, LFP battery storage, and natural gas backup to power an off-grid datacenter at a target renewable energy fraction, across the **US** and **Europe**.
 
-📊 **[Live results page →](https://pabloamc.github.io/Green_datacenters/)** — the headline conclusions, figures, and assumptions at a glance (generated from `output/`, so it never drifts from the numbers).
+📊 **[Live results page →](https://pabloamc.github.io/Green_datacenters/)** — a short TL;DR-first overview plus Geography (incl. the 978-cell Europe scan), Zero-carbon, and Method-&-trust chapters (all generated from `output/`, so the site never drifts from the numbers).
 
 **The question it answers:** *if you build a large datacenter that is not connected to the grid, what is the cheapest mix of clean generation + storage + gas backup that keeps it running 24/7 — and in what year does going (mostly) renewable become cheaper than just burning gas?* The headline output is the **LCOE — Levelized Cost of Energy**, the all-in cost of a delivered megawatt-hour (\$/MWh) once capital, fuel, carbon, and storage are amortised over the project's life. New to the terminology? Jump to the **[Glossary](#-glossary)** first.
 
@@ -29,7 +29,8 @@ The **default model is a FIRM, always-on datacenter**: gas turbines are sized to
 * **`tools/build_solar_only.py` / `tools/build_zerocarbon.py`**: "Do you even need a wind park?" (cost vs renewable fraction, solar+battery-only vs +wind) and the zero-carbon build-option synthesis bar chart (`make solar-only` / `zerocarbon`).
 * **`tools/calibrate_synoptic.py`**: Fits the Dunkelflaute parameters (`syn_persistence`, `syn_loading`, `wind_solar_corr`, and multi-site `site_synoptic_corr`) from a real-weather `.npz` — turning the model's biggest "calibrated, not fitted" caveat into a measured input.
 * **`tools/check_doc_tables.py`**: Doc-drift guard — fails if the §11 result tables in `model_documentation.md` no longer match `output/*.json`. Run by `make check-docs` and in CI.
-* **`tools/build_report.py` / `docs/`**: Generates the self-contained GitHub Pages site (`docs/index.html`) from `output/` + the figures (`make report`); published by `.github/workflows/pages.yml`.
+* **`tools/build_report.py` / `docs/`**: Generates the GitHub Pages site — four self-contained pages (`docs/index.html` Overview with a generated TL;DR, plus Geography / Zero-carbon / Method-&-trust chapters) — from `output/` + the figures (`make report`), so the site can never drift from the numbers; published by `.github/workflows/pages.yml`.
+* **`tools/fetch_era5_grid.py` / `tools/scan_eu.py`**: The **Europe-wide scan** — fetch hourly ERA5 for all of Europe at 1° (monthly-chunked area requests; ~420 MB, gitignored, refetchable), then score the gas-free solar+wind+battery+H₂ build at every land cell (978 cells) with costs re-anchored to each cell's real CFs, and fit a holdout-validated CF→price surrogate. Writes `output/eu_scan_results.json` + the scan map/scatter figures the Geography page embeds.
 * **`Makefile` / `pyproject.toml` / `requirements-lock.txt`**: `pip install -e .` (console command `datacenter-lcoe`); `make test` / `reproduce` / `check`; pinned versions for byte-for-byte reproduction. CI (`.github/workflows/ci.yml`) runs the tests + doc-drift guard on every push.
 * **`sites/`**: Custom-site configs (`--site`). A JSON file inherits a built-in region's defaults and overrides only what varies by location (resource, gas price/carbon, weather structure), so a new geography is a *data* file, not a code change — see `sites/README.md` and `sites/example_texas.json`.
 * **`scratch/plot_comparison.py`**: Regenerates the US vs. Europe 70%-RE firm trajectory against each region's gas baseline and annotates any EU/gas parity crossover.
@@ -126,7 +127,7 @@ Workload presets (`--workload`): `firm` (always-on, 0% shed) · `enterprise` (5%
 
 ### 4. Run the US vs. EU Comparison Plot
 
-Regenerates the firm US-vs-Europe **70%-RE** trajectory against each region's gas baseline (and annotates any EU/gas crossover). EU 70% RE is already below gas from 2025; the US 70% line **never crosses the flat $4/MMBtu US gas baseline within the horizon** (it bottoms at ≈$62/MWh vs the ≈$58 gas reference — a near-miss) — it crosses only a stressed-gas baseline:
+Regenerates the firm US-vs-Europe **70%-RE** trajectory against each region's gas baseline (and annotates any EU/gas crossover). EU 70% RE crosses below carbon-priced gas ~2027 (on the v6.0 real-France weather); the US 70% line **never crosses the flat $4/MMBtu US gas baseline within the horizon** (it bottoms at ≈$60/MWh vs the ≈$58 gas reference — a near-miss) — it crosses only a stressed-gas baseline:
 
 ```bash
 PYTHONPATH=. python scratch/plot_comparison.py
@@ -213,7 +214,7 @@ So premium/AI workloads ($v_{\text{shed}}$ high) never shed and collapse to the 
 | Onshore wind LCOE₀ (\$/MWh) · LR              | 61 · 17%         | 56 · 17%           | Lazard LCOE+ 2025 ($37–86 mid); OWID learning curves  |
 | LFP battery (energy\$/kWh · power \$/kW) · LR | 90 · 160 · 19%  | 90 · 120 · 19%    | BNEF ESS Cost Survey 2025 (US 4h \$108/kWh turnkey)    |
 | CCGT · OCGT capex (\$/kW)                      | 2,000 · 1,000    | 2,000 · 1,000      | GridLab 2025 / EIA AEO2025 (turbine-shortage order book) |
-| Simulated capacity factor (solar / wind)        | 0.23 / 0.33       | 0.16 / 0.29         | inside Lazard CF bands (EU solar below, by irradiance) |
+| Synthetic-generator calibration CF (solar / wind) | 0.23 / 0.33     | 0.16 / 0.29         | inside Lazard CF bands; the **headline** instead uses measured ERA5 site CFs (US 0.26/0.32 Texas, EU 0.18/0.13 France) with costs re-levelled (§4.8) |
 | Gas price (\$/MMBtu) · CO₂ (tCO₂/MWh CCGT)   | 4.0 · 0.345      | 10.0 · 0.345       | EIA Henry Hub / TTF forward; combustion-only (ETS scope) |
 | Carbon price (\$/tCO₂) trajectory              | linear\$0         | logistic\$70→\$200 | EU ETS Fit-for-55                                      |
 | WACC, real (solar/wind · battery · gas)       | 5.5% · 7% · 9%  | 5.5% · 7% · 9%    | NREL ATB; Lazard ≈7.7% nominal ≈ 5.5% real; merchant-risk spread |
@@ -233,7 +234,11 @@ So premium/AI workloads ($v_{\text{shed}}$ high) never shed and collapse to the 
 
 ## 📊 Summary of Crossover Results (FIRM / always-on)
 
-Tables regenerable via `tools/regen_doc_tables.py` from `output/*_results.json`. These are the relevant numbers for any valuable datacenter (premium/AI workloads never shed and collapse to firm). Gas baseline: US flat ~$58/MWh; EU rising from $122 (2025) to $163 (2040) as carbon prices climb. Simulated capacity factors: US solar 0.23 / wind 0.33, EU 0.16 / 0.29 — consistent with the Lazard CF basis of the imported LCOEs.
+Tables regenerable via `tools/regen_doc_tables.py` from `output/*_results.json`. These are the relevant numbers for any valuable datacenter (premium/AI workloads never shed and collapse to firm). Gas baseline: US flat ~$58/MWh; EU rising from $122 (2025) to $163 (2040) as carbon prices climb. Site capacity factors (v6.0, measured ERA5): US solar 0.26 / wind 0.32 (ERCOT Texas), EU 0.18 / 0.13 (France) — imported LCOEs re-levelled to these measured CFs.
+
+> **v6.1 site restructure + continent scan (July 2026).** The Pages site is now a four-page, TL;DR-first report (Overview / Geography / Zero-carbon / Method & trust), and a new **978-cell, 1° scan of all of Europe** (`tools/fetch_era5_grid.py` + `tools/scan_eu.py`, real ERA5 2019–2021) scores the gas-free solar+wind+battery+H₂ build at every land cell. Findings: the cheapest build-it-yourself geography is the **windy North Sea/Baltic edge (~$95–101/MWh at 2030)**, not the sunny south; the sheltered Scandinavian interior is dearest (~$245); firm hydro (~$46) beats every cell. A holdout-validated surrogate shows **two mean capacity factors predict the dispatch cost with R² 0.94 (MAE $5)**; adding drought-depth/winter/correlation features reaches R² 0.96. Headline numbers unchanged.
+
+> **v6.0 real-weather headline (June 2026).** The headline US/EU trajectories now run on **measured ERA5 reanalysis (2015–2025)** at one representative market per region — ERCOT Texas / France — with the imported LCOEs re-levelled to each site's measured CF. France's *measured* wind (CF 0.135) is much poorer than the synthetic calibration assumed, so **deep** EU targets get markedly dearer (90%: 2025 $180→$278, parity moves beyond the horizon; 85% parity ~2040) while **moderate** targets stay attractive (70% ~2027, 80% ~2033) and the gas-free H₂ system crosses ~2035. The US picture barely moves (Texas resource is strong).
 
 > **v5.9 weather & optimizer hardening (June 2026).** Closes the v5.8 full-machinery audit findings: cloud persistence moved into z-space (the Beta cloud marginal now holds **exactly** — deep-overcast days back to 5.2% from the ~1.3% the old filter left — and the realized wind–solar correlation matches the configured ρ instead of half of it), exact solar-CF anchoring, a mid-summer trace seam (winter Dunkelflaute no longer severed at Jan 1), shared local weather across portfolio sites (`site_local_corr`), and an **exact-dispatch confirmation** of every reported optimum (the interpolated surface is now used only inside the optimisation loop; RE tolerance tightened to 0.2%). Net effect ~+2–4% on high-RE cost (honest 1-day droughts) — **EU 90% parity ~2032→~2033**, US unchanged in direction. Machinery details in §12 / the changelog.
 
@@ -247,17 +252,17 @@ Tables regenerable via `tools/regen_doc_tables.py` from `output/*_results.json`.
 
 ### US — 90% RE
 
-* **2025 LCOE:** $154.4/MWh; **2040:** $103.0/MWh. **Parity: >2040 at every RE target** (70–80% bottoms at ≈$62/MWh — just above the $58 flat-gas baseline).
+* **2025 LCOE:** $137.3/MWh; **2040:** $90.6/MWh. **Parity: >2040 at every RE target** (70–80% bottoms at ≈$60/MWh — just above the $58 flat-gas baseline).
 * *Why?* Cheap, untaxed US gas (~$58/MWh even after the v5.8 turbine-shortage capex doubling) is a moat clean energy can't quite cross within the horizon — the v5.8 recalibration moved *both* sides (gas +$12, delivered RE up too via the wind repricing and the re-WACC fix), so the relative picture barely shifts. US RE wins only against the **stressed-gas** reference (×1.6 fuel ≈$74/MWh), which 70–80% RE beats by ~2031–32 — i.e. competitiveness hinges on gas not staying at $4.
 
 ### Europe — 90% RE
 
-* **2025 LCOE:** $179.5/MWh; **2040:** $130.7/MWh. **Parity: ~2033** (70–80% RE reach parity ~2025; **85% ~2027**).
-* *Why?* Expensive, carbon-taxed EU gas makes RE competitive — and with a CF-consistent resource the always-on build that rides out week-long Dunkelflaute reaches 90% parity by ~2033 (v5.8 moved this out from ~2030: delivered RE generation got dearer — wind $48→$56, no re-WACC discount — while EU gas rose only ~$8, its cost being fuel+carbon-dominated; the v5.9 weather hardening adds ~a year via honest 1-day-drought statistics).
+* **2025 LCOE:** $278.0/MWh; **2040:** $219.3/MWh. **Parity: >2040** on real French weather (**70% ~2027, 80% ~2033, 85% ~2040**; the gas-free H₂ system crosses **~2035** at $191→$142).
+* *Why?* Expensive, carbon-taxed EU gas makes **moderate** renewable shares competitive quickly — but France's *measured* wind (CF 0.135, v6.0) is poor, so the always-on build that rides out week-long Dunkelflaute needs heavy overbuild at deep targets, and the last decile no longer reaches parity within the horizon at this single site. (A better-sited or multi-site build softens this — see the siting ranking and the `--sites` portfolio option; the 978-cell scan puts the cheapest DIY cells at ~$95–101.)
 
 ### If the compute is cheap (interruptible)
 
-For low-value/spot compute, shedding the most expensive hours helps a lot: in the `--flex-sweep` (EU 90% RE, 2030), a 95%-interruptible workload valued at $25/MWh sees delivered cost fall to ~$34/MWh (parity by 2025) versus ~$165/MWh fully firm. (The flex-sweep runs at reduced fidelity — coarser grid, wider bounds — so its firm corner reads above the §11 headline of ~$153; treat the *shape* of the trade-off, not the absolute, as the point.) Premium AI ($900/MWh) sheds nothing and stays firm.
+For low-value/spot compute, shedding the most expensive hours helps a lot: in the `--flex-sweep` (EU 90% RE, 2030), a 95%-interruptible workload valued at $25/MWh sees delivered cost fall to ~$34/MWh (parity by 2025) versus ~$165/MWh fully firm. (The flex-sweep is a reduced-fidelity, synthetic-weather sweep — coarser grid, wider bounds, pre-v6.0 calibration — so its absolute levels don't match the real-weather headline tables above; treat the *shape* of the trade-off as the point.) Premium AI ($900/MWh) sheds nothing and stays firm.
 
 ### Where in Europe to build (siting comparison)
 
