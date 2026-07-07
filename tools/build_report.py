@@ -1217,9 +1217,11 @@ a{color:var(--blue)}
 
 
 def _page(fname, title, body, foot, h1=None):
-    nav = "".join(
-        f'<a href="{href}"{" class=\"on\"" if href == fname else ""}>{label}</a>'
-        for href, label in NAV)
+    nav_parts = []
+    for href, label in NAV:      # no f-string conditional: 3.10 forbids \" in {expr}
+        cls = ' class="on"' if href == fname else ''
+        nav_parts.append(f'<a href="{href}"{cls}>{label}</a>')
+    nav = "".join(nav_parts)
     head_h1 = f"<h1>{h1}</h1>" if h1 else ""
     return ('<!doctype html>\n<html lang="en"><head>\n'
             '<meta charset="utf-8">'
