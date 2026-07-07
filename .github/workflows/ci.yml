@@ -23,3 +23,12 @@ jobs:
         run: python tests/test_model.py
       - name: Doc-table drift guard (§11 tables vs output/)
         run: python tools/check_doc_tables.py
+      # The Pages site is only built at deploy time (pages.yml, on main), so without
+      # this step a PR that breaks build_report.py — or edits it without regenerating
+      # docs/ — is caught only after merge. The build is byte-deterministic, so a clean
+      # diff is exactly "committed docs match the committed script + exports".
+      - name: Report builds & committed docs/ are current
+        run: |
+          python tools/build_report.py
+          git diff --exit-code -- docs/ \
+            || { echo '::error::docs/ is stale — run `make report` and commit'; exit 1; }

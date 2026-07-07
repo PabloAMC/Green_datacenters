@@ -539,6 +539,24 @@ WIND_EU  = TechParams("Onshore Wind (EU)", lcoe_today=56.0, learning_rate=0.17,
                       additions_growth_rate=0.03, additions_growth_decay=0.85,
                       om_frac_lcoe=0.25, life_yr=25)
 
+# Offshore wind, European fixed-bottom (v6.2) — used by the continent scan to price
+# part-sea coastal cells honestly (their measured wind CF is offshore-grade, so pricing
+# it at onshore capex flatters them). lcoe_today ≈ $110/MWh is the 2024–25 European
+# market-clearing level: UK CfD AR7 (Jan 2026) cleared at ~£91/MWh in 2024 money
+# (≈$116, 20-yr contract); AR6 (2024) ≈$100–105 proved underpriced (Hornsea 4 walked);
+# the 2024–25 zero-subsidy DE/DK/NL tenders all drew zero bids, so auction strikes are
+# the honest floor. Lazard v18 spans $70–157 (CF 0.55–0.45); IRENA 2024 global $79 at
+# CF 0.41. Quoted at OFFSHORE_REF_CF = 0.50 (modern North Sea design CF — re-anchor by
+# 0.50/site_CF). Learning ~10%/doubling (OWID 2010-19 LCOE basis; NREL capex 8.8%
+# fixed-bottom) vs 17% onshore; ≈83 GW cumulative, ≈12 GW added 2025 (GWEC). Floating
+# (needed beyond ~60 m depth, e.g. the Norwegian Trench) runs ≈2.4× fixed-bottom (UK
+# AR6/AR7 floating vs fixed strikes) and is NOT modelled — flagged in prose instead.
+WIND_EU_OFFSHORE = TechParams("Offshore Wind (EU)", lcoe_today=110.0, learning_rate=0.10,
+                              cumulative_gw_2025=83.0, annual_additions_gw=12.0,
+                              additions_growth_rate=0.10, additions_growth_decay=0.85,
+                              om_frac_lcoe=0.28, life_yr=25)
+OFFSHORE_REF_CF = 0.50
+
 SMR    = SMRParams()
 SMR_EU = SMRParams(name="SMR (EU)", lcoe_foak=175.0, lcoe_noak=85.0, years_to_noak=12)
 
