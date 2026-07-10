@@ -1242,7 +1242,7 @@ def main():
             'the AI Office or the EU Commission.</div>')
     pages = {
         "index.html": ("Green datacenters — Overview",
-                       "How green can an off-grid datacenter be, and where is clean power cheapest?",
+                       "How expensive is it to run a datacenter mostly on renewables?",
                        index_page(us, eu)),
         "geography.html": ("Green datacenters — Geography",
                            None, siting_section() + scan_section() + locations_section()),
