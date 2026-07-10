@@ -179,8 +179,8 @@ def tldr(us, eu):
         f'{100 * p70 / (500 + g0):.0f}%; even the full gas-free premium (+${ph2:.0f} '
         f'today, shrinking to nil as it crosses gas {_cross(h2_py)}) raises it '
         f'~{100 * ph2 / (800 + g0):.0f}–{100 * ph2 / (500 + g0):.0f}%. A conventional '
-        f'facility, with cheaper hardware per MWh, feels the same premiums roughly '
-        f'twice as hard.</p>')
+        f'facility, with cheaper hardware per MWh, faces roughly twice that '
+        f'percentage premium.</p>')
     return ('<div class="tldr"><h2>Three things to take away</h2><ol>'
             + "".join(items) + '</ol>' + scale +
             '<p class="macro">The model covers only the choice each <i>new</i> datacenter '
@@ -263,7 +263,7 @@ def findings(us, eu):
                     f"a linear FOAK→NOAK decline, then flat — no Wright's-Law learning, since "
                     f"there is no deployed fleet to learn from. An ${smr_us[-1]:.0f} NOAK "
                     f"undercuts the EU 90% build (≈${eu90_2040:.0f}/MWh in 2040) if NOAK costs "
-                    f"materialise — the big if, given FOAK history — but never approaches the "
+                    f"materialise — uncertain, given FOAK history — but never approaches the "
                     f"${us['gas_pure'][0]:.0f} US gas baseline.")
     else:
         smr_support = ("SMRs enter as an exogenous FOAK→NOAK reference line, never part of "
@@ -279,19 +279,20 @@ def findings(us, eu):
          f"The baseline is gas rising ${eu['gas_pure'][0]:.0f}→${eu['gas_pure'][-1]:.0f}/MWh "
          f"as EU carbon prices climb. France's measured wind is poor (capacity factor 0.135), "
          f"so riding out multi-day winter Dunkelflaute takes heavy overbuild — roughly 10× "
-         f"solar + 9× wind + 6h battery at the 90% target. The cheap insurance is moderate "
-         f"renewables; the last decile is a genuine premium on a poor-wind hub."),
-        ("Batteries get you through the night; wind gets you through the winter.",
-         f"A solar+battery system hits a hard wall at ≈{solo_wall} renewable — no affordable "
+         f"solar + 9× wind + 6h battery at the 90% target. Moderate renewables are the "
+         f"low-cost portion; the last decile is a premium on a poor-wind hub."),
+        ("Batteries cover overnight gaps; wind covers multi-day winter lulls.",
+         f"A solar+battery system reaches a ceiling at ≈{solo_wall} renewable — no affordable "
          f"battery bridges a week-long lull — while adding wind extends the same firm system "
          f"to ≈{wind_max}.",
-         f"Wind's lulls don't coincide with overcast spells, which is why it unlocks the "
-         f"winter. {solo_vs}Even with wind, a firm battery-only system tops out near ~94% "
+         f"Wind's lulls don't coincide with overcast spells, which is why adding wind "
+         f"raises the achievable winter renewable share. {solo_vs}Even with wind, a firm "
+         f"battery-only system tops out near ~94% "
          f"renewable: the last few percent need long-duration storage or hydrogen."),
-        ("The firming choice — what covers the dark, windless weeks — moves the bill more than the panels do.",
+        ("The firming choice — what covers the dark, windless weeks — changes the delivered cost more than the generation build does.",
          f"A fully gas-free build firmed by self-produced hydrogen delivers "
          f"${h2[0]:.0f}→${h2[-1]:.0f}/MWh in Europe, crossing below gas {_cross(h2_cross)}.",
-         f"Gas is the cheap-but-emitting default; purchasing green H₂ for the same turbine "
+         f"Gas is the lower-cost emitting option; purchasing green H₂ for the same turbine "
          f"adds ≈$25–30/MWh (a premium that narrows as EU carbon rises); self-produced H₂ — "
          f"an electrolyser plus tank storage, charged on surplus sun — is the cheaper "
          f"zero-carbon route. {phs_vs_h2}"),
@@ -310,12 +311,12 @@ def findings(us, eu):
          f"At $4/MMBtu, renewables compete with a ~$29/MWh <i>fuel</i> bill, not the "
          f"${us['gas_pure'][0]:.0f} all-in gas LCOE — so the pure cost-optimum is ≈0% "
          f"renewable today and only ~⅓ (solar-only, no battery) by 2040. A clean US "
-         f"datacenter is a hedge against gas and carbon prices; in Europe it is simply "
+         f"datacenter reduces exposure to gas and carbon prices; in Europe it is "
          f"the cheaper plant."),
-        ("AI datacenters don't just ride the learning curve — they pull it.",
+        ("AI datacenter procurement accelerates the technology learning curve.",
          "Every doubling of cumulative deployment cuts battery system cost ~19% and solar "
-         "~25% (Wright's Law), and GW-scale datacenter procurement lands on exactly the "
-         "technologies with the steepest curves.",
+         "~25% (Wright's Law), and GW-scale datacenter procurement is concentrated in the "
+         "technologies with the steepest learning curves.",
          "Battery turnkey prices fell ~31% in 2025 alone. The deployment trajectory behind "
          "these projections already leans on the AI clean-power buildout to keep additions "
          "growing — so each clean campus pulls the parity years above forward for everyone "
@@ -707,7 +708,7 @@ def wind_section():
         '<h2>Does the build need a wind park?</h2>'
         '<p>Solar is modular and quick to permit; a wind park is a far bigger siting and '
         'permitting undertaking. Comparing solar + wind + battery against <b>solar + '
-        f'battery only</b> (both firm, gas-backed, {yr}): <b>there is a hard wall</b>. The '
+        f'battery only</b> (both firm, gas-backed, {yr}): <b>there is a ceiling</b>. The '
         f'no-wind system tops out near <b>~{wall:.0%} renewable</b> — nights <i>and</i> '
         'multi-day cloud always fall to gas, and a battery cannot shift energy across days '
         '— while adding wind reaches ~94%. Below the wall, dropping wind costs little in '
@@ -780,7 +781,7 @@ def footprint_section(us, eu):
         f'hydrogen) needs roughly:</p>'
         '<ul class="find">'
         f'<li><b>~{s_lo:.0f}–{s_hi:.0f} km² of solar plant</b> (a ~{s_lo**0.5:.0f}–'
-        f'{s_hi**0.5:.0f} km square) — the dominant direct land take. In the sunnier US '
+        f'{s_hi**0.5:.0f} km square) — the largest direct land use. In the sunnier US '
         f'the same build needs only ~{su_lo:.0f}–{su_hi:.0f} km².</li>'
         f'<li><b>~{w_sp:.0f} km² of wind-park spacing</b>, of which only '
         f'~{w_direct:.0f} km² (~1–2%) is actually occupied by towers and roads — the '
@@ -798,14 +799,14 @@ def footprint_section(us, eu):
         'rivers carries an ecological cost not captured in the price. The land area is '
         'reported per GW so it can be weighed explicitly.</p>'
         '<h3>And the water?</h3>'
-        '<p>Water is often the first local objection, and it splits into two separate '
+        '<p>Water use splits into two separate '
         'ledgers. The <b>power side</b> of this build is essentially water-free: solar, '
         'wind and batteries consume almost nothing (panel washing aside), the '
         'electrolyser\'s feedwater (~10–15 L per kg of H₂) is minor at these volumes, and '
         'the hydrogen turbine runs only through the rare lulls — while the gas plant the '
         'build replaces <i>evaporates</i> roughly 0.8 m³ of cooling water per MWh it '
         'generates. The <b>datacenter side</b> is a design choice, not a consequence of '
-        'going off-grid: evaporative cooling drinks ~1–2 L per kWh of IT load, but dry '
+        'going off-grid: evaporative cooling consumes ~1–2 L per kWh of IT load, but dry '
         '(closed-loop) cooling cuts site water to near zero for a small efficiency '
         'penalty — a common choice at the sunny, dry sites the siting ranking ranks '
         'highest (Iberia, the islands), where water is scarcest.</p>'
@@ -921,8 +922,8 @@ def tornado_section():
         f'the gap by ${sw(rows[0]):.0f}/MWh and <b>{rows[1][0]}</b> by '
         f'${sw(rows[1]):.0f} — together they account for most of the range — while the smallest '
         f'levers ({rows[-1][0]}, ${sw(rows[-1]):.0f}; {rows[-2][0]}, '
-        f'${sw(rows[-2]):.0f}) barely move it. In words: whether deep-renewable Europe '
-        f'reaches parity with gas hinges on <b>wind quality and the gas price</b>, not on battery costs '
+        f'${sw(rows[-2]):.0f}) change it little. Whether deep-renewable Europe '
+        f'reaches parity with gas depends on <b>wind quality and the gas price</b>, not on battery costs '
         f'or financing.</p>'
         + _fig_box(fig, "tornado chart: parity-gap sensitivity to each assumption")
         + '<p class="sub" style="font-size:13px">Reduced-fidelity, one-at-a-time swings on '
@@ -1008,7 +1009,7 @@ def method_page(us, eu):
     gloss = "".join(f"<tr><th>{t}</th><td>{x}</td></tr>" for t, x in GLOSSARY)
     return (
         '<h1>Method &amp; how much to trust it</h1>'
-        '<div class="caveat"><b>Read this before quoting numbers.</b> This is a stylised '
+        '<div class="caveat"><b>How far to trust these numbers.</b> This is a stylised '
         'techno-economic model. Trust the <b>directional comparisons</b> — which option is '
         'cheaper, how gaps close over time — not absolute numbers to better than '
         '<b>~±20–30%</b>. Results are central estimates; the model also reports P10–P90 '
@@ -1055,9 +1056,9 @@ def method_page(us, eu):
         '<figcaption>United States — same series. Texas\'s stronger sun and wind reach '
         'the same targets with far less overbuild.</figcaption></figure>'
         '</div>'
-        '<h2>Where the money goes</h2>'
-        '<p>The delivered cost, split by what is actually paid for. Two things to notice: '
-        'the <b>battery is a thin slice at every target</b> — high-renewable economics are '
+        '<h2>Cost breakdown</h2>'
+        '<p>The delivered cost, split by what is actually paid for. Two points: '
+        'the <b>battery is a small share at every target</b> — high-renewable economics are '
         'dominated by generation overbuild and firming, not storage — and moving from 70% '
         'to 85% renewable is bought almost entirely with <b>more generation capital</b> '
         '(the overbuild that rides out multi-day lulls), while the firming and carbon '
@@ -1065,11 +1066,11 @@ def method_page(us, eu):
         '<div class="figs">'
         f'<figure><img src="{_img("eu_firm_fig4_breakdown.png")}" alt="EU cost breakdown '
         'at 70% renewable"><figcaption>Europe, 70% renewable — generation capital plus gas '
-        'firming (fuel, capital, carbon) carry the bill; the battery (pink) barely '
-        'shows.</figcaption></figure>'
+        'firming (fuel, capital, carbon) carry most of the cost; the battery (pink) is a '
+        'small slice.</figcaption></figure>'
         f'<figure><img src="{_img("eu_firm_fig5_breakdown.png")}" alt="EU cost breakdown '
         'at 85% renewable"><figcaption>Europe, 85% renewable — the last percentage points '
-        'are bought with overbuild: generation capital balloons, firming shrinks, the '
+        'are bought with overbuild: generation capital rises sharply, firming shrinks, the '
         'battery stays thin.</figcaption></figure>'
         '</div>'
         + tornado_section()
@@ -1110,7 +1111,7 @@ def index_page(us, eu):
         'the narrower question each <i>builder</i> controls: if you pair a new datacenter '
         'with its own solar, wind and batteries, how clean can it run, and what does that '
         'cost compared with just burning gas?</p>'
-        '<p>The catch is that a datacenter needs power every hour and sun and wind don\'t '
+        '<p>A datacenter needs power every hour, and sun and wind don\'t '
         'deliver every hour. The bill therefore hinges on the <b>backstop</b> for dark, '
         'windless spells (a <i>Dunkelflaute</i>): a gas turbine, which emits, or a clean '
         'option — hydrogen, pumped storage, hydro, nuclear. The model finds the least-cost '

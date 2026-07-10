@@ -127,7 +127,7 @@ Workload presets (`--workload`): `firm` (always-on, 0% shed) · `enterprise` (5%
 
 ### 4. Run the US vs. EU Comparison Plot
 
-Regenerates the firm US-vs-Europe **70%-RE** trajectory against each region's gas baseline (and annotates any EU/gas crossover). EU 70% RE crosses below carbon-priced gas ~2027 (on the v6.0 real-France weather); the US 70% line **never crosses the flat $4/MMBtu US gas baseline within the horizon** (it bottoms at ≈$60/MWh vs the ≈$58 gas reference — a near-miss) — it crosses only a stressed-gas baseline:
+Regenerates the firm US-vs-Europe **70%-RE** trajectory against each region's gas baseline (and annotates any EU/gas crossover). EU 70% RE crosses below carbon-priced gas ~2027 (on the v6.0 real-France weather); the US 70% line **never crosses the flat $4/MMBtu US gas baseline within the horizon** (it bottoms at ≈$60/MWh vs the ≈$58 gas reference — within ~$2/MWh) — it crosses only a stressed-gas baseline:
 
 ```bash
 PYTHONPATH=. python scratch/plot_comparison.py
@@ -260,11 +260,11 @@ Tables regenerable via `tools/regen_doc_tables.py` from `output/*_results.json`.
 ### Europe — 90% RE
 
 * **2025 LCOE:** $278.0/MWh; **2040:** $219.3/MWh. **Parity: >2040** on real French weather (**70% ~2027, 80% ~2033, 85% ~2040**; the gas-free H₂ system crosses **~2035** at $191→$142).
-* *Why?* Expensive, carbon-taxed EU gas makes **moderate** renewable shares competitive quickly — but France's *measured* wind (CF 0.135, v6.0) is poor, so the always-on build that rides out week-long Dunkelflaute needs heavy overbuild at deep targets, and the last decile no longer reaches parity within the horizon at this single site. (A better-sited or multi-site build softens this — see the siting ranking and the `--sites` portfolio option; the 978-cell scan puts the cheapest DIY cells at ~$95–101.)
+* *Why?* High-priced, carbon-taxed EU gas makes **moderate** renewable shares cheaper than gas quickly — but France's *measured* wind (CF 0.135, v6.0) is low, so the always-on build that rides out week-long Dunkelflaute needs large overbuild at deep targets, and the last decile no longer reaches parity within the horizon at this single site. (A better-sited or multi-site build reduces this cost — see the siting ranking and the `--sites` portfolio option; the 978-cell scan puts the cheapest DIY cells at ~$95–101.)
 
 ### If the compute is cheap (interruptible)
 
-For low-value/spot compute, shedding the most expensive hours helps a lot: in the `--flex-sweep` (EU 90% RE, 2030), a 95%-interruptible workload valued at $25/MWh sees delivered cost fall to ~$34/MWh (parity by 2025) versus ~$165/MWh fully firm. (The flex-sweep is a reduced-fidelity, synthetic-weather sweep — coarser grid, wider bounds, pre-v6.0 calibration — so its absolute levels don't match the real-weather headline tables above; treat the *shape* of the trade-off as the point.) Premium AI ($900/MWh) sheds nothing and stays firm.
+For low-value/spot compute, shedding the most expensive hours reduces delivered cost substantially: in the `--flex-sweep` (EU 90% RE, 2030), a 95%-interruptible workload valued at $25/MWh sees delivered cost fall to ~$34/MWh (parity by 2025) versus ~$165/MWh fully firm. (The flex-sweep is a reduced-fidelity, synthetic-weather sweep — coarser grid, wider bounds, pre-v6.0 calibration — so its absolute levels don't match the real-weather headline tables above; treat the *shape* of the trade-off as the relevant result.) Premium AI ($900/MWh) sheds nothing and stays firm.
 
 ### Where in Europe to build (siting comparison)
 
@@ -293,7 +293,7 @@ The model lives at the intersection of power-systems and finance jargon. Quick d
 | **Firm / always-on**                     | A datacenter that never shuts down: gas backup is sized to cover 100% of load during lulls, so the worst case is a known, capped cost. The model's default.                                                   |
 | **Interruptible / shedding**             | Optionally pausing cheap workloads during deficits instead of burning gas. Only done when the lost compute is worth less than the gas it would take to serve it.                                              |
 | **Overbuild**                            | Installing more solar/wind nameplate than peak load (e.g. "6× solar") so enough energy is still made on poor-weather days. Excess on good days is**curtailed** (spilled).                              |
-| **Dunkelflaute**                         | German for "dark doldrums" — a multi-day, wide-area spell of low sun*and* low wind. The hardest thing for a renewable system to ride through; it sets how much storage/backup is needed.                   |
+| **Dunkelflaute**                         | German for "dark doldrums" — a multi-day, wide-area spell of low sun*and* low wind. The main driver of how much storage/backup a renewable system needs.                   |
 | **WACC**                                 | Weighted Average Cost of Capital — the financing/discount rate. The model uses a different WACC per technology (solar/wind 5.5%, battery 7%, gas 9%) to reflect differing risk.                              |
 | **Wright's Law / learning rate**         | Empirical rule that a technology's cost falls by a fixed % for every doubling of cumulative production. A 30% solar learning rate means each doubling cuts cost ~30%. Drives the cost-over-time trajectories. |
 | **CCGT / OCGT**                          | Combined-Cycle / Open-Cycle Gas Turbine. CCGT is efficient baseload; OCGT is a cheap-to-build, expensive-to-run peaker. The model picks whichever is cheaper for the gas duty.                                |
