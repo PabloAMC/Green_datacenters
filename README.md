@@ -311,3 +311,7 @@ The model lives at the intersection of power-systems and finance jargon. Quick d
 ## 📜 License
 
 This work is licensed under a [**Creative Commons Attribution 4.0 International (CC BY 4.0)**](https://creativecommons.org/licenses/by/4.0/) license — see [`LICENSE`](LICENSE). You may share and adapt the model and its outputs, including commercially, provided you give appropriate credit. The cost and weather *inputs* are derived from the third-party sources cited in `model_documentation.md`, which carry their own terms.
+
+---
+
+*This model was created in early June 2026, before I joined the AI Office in the European Commission. Nothing here represents the opinion of the AI Office or the EU Commission.*

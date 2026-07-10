@@ -1240,7 +1240,9 @@ def main():
             f'<code>{prov.get("git_commit", "—")}</code> (config '
             f'{prov.get("config_sha256", "—")}) · <a href="{REPO_URL}">source on GitHub</a> '
             '· licensed CC BY 4.0. Reproduce: <code>make reproduce &amp;&amp; make report'
-            '</code>.</div>')
+            '</code>.<br>This model was created in early June 2026, before I joined the '
+            'AI Office in the European Commission. Nothing here represents the opinion of '
+            'the AI Office or the EU Commission.</div>')
     pages = {
         "index.html": ("Green datacenters — Overview",
                        "How green can a datacenter be — and where should it go?",
