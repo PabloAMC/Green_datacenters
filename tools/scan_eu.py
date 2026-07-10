@@ -41,7 +41,9 @@ import matplotlib.pyplot as plt
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from lcoe.params import REGIONS, _sys_with, MODEL_VERSION          # noqa: E402
+from dataclasses import replace                                    # noqa: E402
+from lcoe.params import (REGIONS, _sys_with, MODEL_VERSION,        # noqa: E402
+                         WIND_EU_OFFSHORE, OFFSHORE_REF_CF)
 from lcoe.h2system import h2_system_trajectory                     # noqa: E402
 from lcoe.reporting import git_commit                              # noqa: E402
 from tools.build_locations import cf_consistent_techs              # noqa: E402
@@ -90,6 +92,30 @@ def _init_worker(grid_path, milestone):
     _G["solar"], _G["wind"] = d["solar"], d["wind"]
     _G["lat"], _G["lon"], _G["lsm"] = d["lat"], d["lon"], d["lsm"]
     _G["mi"] = milestone
+
+
+LSM_OFFSHORE = 0.6   # below this land fraction the cell's wind CF is sea-grade
+
+
+def score_cell_offshore(c):
+    """Same gas-free build as `score_cell`, but wind priced at European fixed-bottom
+    OFFSHORE costs (`WIND_EU_OFFSHORE` re-anchored from OFFSHORE_REF_CF to the cell's
+    CF; ~10% learning vs 17% onshore). The onshore-priced score flatters part-sea
+    cells — their measured CF is offshore-grade wind bought at onshore capex — so this
+    is the honest (conservative) price for cells with land fraction < LSM_OFFSHORE."""
+    sol, win = _G["solar"][c].astype(float), _G["wind"][c].astype(float)
+    cf_s, cf_w = float(sol.mean()), float(win.mean())
+    reg = REGIONS["eu"]
+    solar_t, _ = cf_consistent_techs(reg, "eu", cf_s, cf_w)
+    wind_t = replace(WIND_EU_OFFSHORE, lcoe_today=WIND_EU_OFFSHORE.lcoe_today
+                     * OFFSHORE_REF_CF / max(cf_w, 1e-6))
+    sysp = _sys_with(reg["sys"], n_mc_weather=sol.shape[0])
+    j = _G["mi"] - 2025
+    wy = [(sol[k], win[k]) for k in range(sol.shape[0])]
+    out = h2_system_trajectory(solar_t, wind_t, reg["battery"], cf_s * 24, 7.0, sysp,
+                               j, seed=42, n_mc=sol.shape[0], weather_years=wy,
+                               ldes_tech="h2", year_subset=[j])
+    return {"cell": int(c), "lcoe_offshore": round(float(out["lcoe"][j]), 2)}
 
 
 def score_cell(c):
@@ -349,11 +375,45 @@ def main(argv=None):
     p.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 4) - 2))
     p.add_argument("--smoke", action="store_true")
     p.add_argument("--figs-only", action="store_true")
+    p.add_argument("--offshore", action="store_true",
+                   help="re-score cells with land fraction < %.1f at OFFSHORE wind "
+                        "costs and merge `lcoe_offshore` into the existing JSON "
+                        "(run after the main scan)" % LSM_OFFSHORE)
     args = p.parse_args(argv)
 
     if args.smoke:
         rows = smoke(args.milestone)
         print(f"smoke OK ({len(rows)} sites scored)")
+        return
+
+    if args.offshore:
+        d = json.load(open(OUT_JSON))
+        todo = [c["cell"] for c in d["cells"] if c["lsm"] < LSM_OFFSHORE]
+        print(f"Offshore re-pricing {len(todo)} cells with lsm < {LSM_OFFSHORE} "
+              f"(fixed-bottom ${WIND_EU_OFFSHORE.lcoe_today:.0f}/MWh at CF "
+              f"{OFFSHORE_REF_CF}, LR {WIND_EU_OFFSHORE.learning_rate:.0%}; "
+              f"{args.workers} workers) …")
+        off = {}
+        with ProcessPoolExecutor(max_workers=args.workers, initializer=_init_worker,
+                                 initargs=(args.grid, d["milestone"])) as ex:
+            for k, r in enumerate(ex.map(score_cell_offshore, todo, chunksize=2)):
+                off[r["cell"]] = r["lcoe_offshore"]
+                if (k + 1) % 25 == 0 or k + 1 == len(todo):
+                    print(f"  {k + 1}/{len(todo)}", flush=True)
+        for c in d["cells"]:
+            if c["cell"] in off:
+                c["lcoe_offshore"] = off[c["cell"]]
+        d["offshore"] = {"lsm_threshold": LSM_OFFSHORE, "n_cells": len(todo),
+                         "lcoe_today": WIND_EU_OFFSHORE.lcoe_today,
+                         "ref_cf": OFFSHORE_REF_CF,
+                         "learning_rate": WIND_EU_OFFSHORE.learning_rate,
+                         "note": ("European fixed-bottom (UK CfD AR7 ~$116/MWh 2024-money; "
+                                  "Lazard v18 $70-157; IRENA 2024 $79 @ CF 0.41); floating "
+                                  "(>~60 m depth, e.g. Norwegian Trench) ≈2.4x — not "
+                                  "modelled")}
+        with open(OUT_JSON, "w") as fh:
+            json.dump(d, fh)
+        print(f"Merged lcoe_offshore into {OUT_JSON}")
         return
 
     if args.figs_only:

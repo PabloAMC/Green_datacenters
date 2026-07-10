@@ -1684,7 +1684,7 @@ saving (ii), not the time resolution. The headline FIRM results are unaffected (
 penalty) point at reduced fidelity (coarser grid, fewer MC years) and wider bounds. Treat its
 absolute LCOE as indicative; the *shape* of the trade-off surface is the point.
 
-**Synoptic factor is calibrated, not fitted.** The Dunkelflaute structure (§4.6) uses plausible loadings/persistence ($\lambda=0.5$, $\varphi\approx0.82$–0.85) rather than values fitted to multi-decade ERA5 reanalysis at a specific site. It restores realistic multi-day clustering and correct directionality, but the exact frequency/depth of week-scale lulls — which sets high-RE storage/backup — should be validated against site reanalysis before siting decisions. **This is the single largest accuracy gap** and the highest-value next improvement (the single-site assumption is addressed separately by the §4.7 portfolio). `tools/calibrate_synoptic.py` now *fits* λ/φ/ρ (and, for multi-site input, `site_synoptic_corr`) from a real weather `.npz` — a fast moment estimator (monotone, biased toward zero; for ranking and starting values, refine with simulated moments) that converts these from assumptions into measured inputs once a reanalysis feed is wired. The integration seam for closing it is wired end to end: `ChronologicalSimulator(..., weather_years=...)` (CLI `--weather PATH.npz`, loader `weather.load_weather_traces`) dispatches supplied real ERA5/NSRDB hourly CF years instead of the synthetic generator, leaving the optimiser, costing and figures unchanged; and `tools/ingest_weather.py` converts provider data (hourly-CF CSVs, with the documented ERA5/NSRDB → CF recipe) into that `.npz` — so wiring a reanalysis feed is a data step, not a code change.
+**Synoptic factor is calibrated, not fitted — a *synthetic-mode* caveat.** The Dunkelflaute structure (§4.6) uses plausible loadings/persistence ($\lambda=0.5$, $\varphi\approx0.82$–0.85) rather than values fitted to multi-decade ERA5 reanalysis at a specific site. It restores realistic multi-day clustering and correct directionality, but the exact frequency/depth of week-scale lulls — which sets high-RE storage/backup — should be validated against site reanalysis before siting decisions. Since v6.0 the **headline no longer depends on this**: it runs on measured ERA5 (§4.8), which carries the real lull structure. The gap now applies only to the synthetic-generator paths (resource presets/sweeps, tornado, what-ifs), where it remains the largest accuracy item (the single-site assumption is addressed separately by the §4.7 portfolio). `tools/calibrate_synoptic.py` now *fits* λ/φ/ρ (and, for multi-site input, `site_synoptic_corr`) from a real weather `.npz` — a fast moment estimator (monotone, biased toward zero; for ranking and starting values, refine with simulated moments) that converts these from assumptions into measured inputs once a reanalysis feed is wired. The integration seam for closing it is wired end to end: `ChronologicalSimulator(..., weather_years=...)` (CLI `--weather PATH.npz`, loader `weather.load_weather_traces`) dispatches supplied real ERA5/NSRDB hourly CF years instead of the synthetic generator, leaving the optimiser, costing and figures unchanged; and `tools/ingest_weather.py` converts provider data (hourly-CF CSVs, with the documented ERA5/NSRDB → CF recipe) into that `.npz` — so wiring a reanalysis feed is a data step, not a code change.
 
 **Gas CF approximation.** The gas backup LCOE uses $f_{\text{gas}}$ as both the gas plant capacity factor and the energy fraction; capacity capital is separately peak-scaled (firm → 100% of load). Reasonable since dispatch runs gas only when battery (and any shedding) are exhausted.
 
@@ -1736,18 +1736,25 @@ headline resource, so it defines the published numbers.)
 
 Treat this as a **stylised techno-economic model: trust directional comparisons, not absolute
 numbers to better than ~±20–30%.** Robust conclusions: cheap untaxed US gas is hard to beat —
-under the v5.7 deployment recalibration **no RE target crosses flat $4 gas within the horizon**
-(the moat *strengthens*), and US RE wins only if gas rises (the stressed-gas line); carbon-priced
-EU gas is beatable, with parity moving from ~2025 (70–80% RE) to ~2030 (90% RE); ≥95% RE is
-infeasible for the battery-only firm system (~94% ceiling), needing LDES/H₂ to close;
-high-RE economics are overbuild-and-gas-dominated, not battery-dominated; and demand
-flexibility only helps when compute is worth less than gas — i.e. rarely for premium AI. Not to
-be trusted as precise: specific parity *years* and $/MWh (synthetic uncalibrated weather, my own
-battery-cost basis, and the **deployment/learning extrapolation to 2040** — v5.7 puts the
-central deployment on a defensible S-curve, ~15.6 TW solar, but the low↔high band in §3 still
-spans ~±$5–10/MWh at 2040, and the assumed flat US gas price is a comparable swing). The biggest
-remaining lever to tighten accuracy is replacing the synthetic weather with real multi-year
-ERA5/NSRDB reanalysis.
+on measured Texas weather **no RE target crosses flat $4 gas within the horizon** (the moat
+*strengthens* under the v5.7 deployment recalibration), and US RE wins only if gas rises (the
+stressed-gas line); carbon-priced EU gas is beatable at moderate targets — on measured French
+weather **70% RE crosses ~2027 and 80% ~2033, but 85% only ~2040 and 90% not within the
+horizon** (§11; the pre-v6.0 synthetic weather put 90% parity ~2033 — that was a good-wind
+site, not France); ≥95% RE is infeasible for the battery-only firm system (~94% ceiling),
+needing LDES/H₂ to close; high-RE economics are overbuild-and-gas-dominated, not
+battery-dominated; and demand flexibility only helps when compute is worth less than gas —
+i.e. rarely for premium AI. Not to be trusted as precise: specific parity *years* and $/MWh
+(one measured site per region — a poorer-wind hub like France genuinely differs from a windy
+one, see the siting chapter; my own battery-cost basis; and the **deployment/learning
+extrapolation to 2040** — v5.7 puts the central deployment on a defensible S-curve, ~15.6 TW
+solar, but the low↔high band in §3 still spans ~±$5–10/MWh at 2040, and the assumed flat US
+gas price is a comparable swing). With the headline on real ERA5 weather since v6.0, the
+biggest remaining accuracy levers are the single-site assumption (§4.7 portfolio, opt-in) and
+the coastal continent-scan cells' wind pricing — now bounded from both sides by
+`tools/scan_eu.py --offshore`, which re-prices sea-grade cells at European fixed-bottom
+offshore costs (`WIND_EU_OFFSHORE`: $110/MWh at CF 0.50, 10% learning; UK CfD AR7 clearing
+level) alongside the onshore-priced base case.
 
 ---
 

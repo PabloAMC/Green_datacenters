@@ -168,6 +168,7 @@ def main(argv=None):
 
     # Parity-gap tornado sensitivity
     if args.tornado:
+        import json
         region = args.region or "eu"
         re_t = (args.re or [0.90])[0]
         t = run_tornado(region_key=region, re_target=re_t, target_year=2030,
@@ -176,7 +177,13 @@ def main(argv=None):
         name = f"{region}_tornado"
         fig = plot_tornado(t)
         fig.savefig(f"figs/{name}.png", dpi=200, bbox_inches="tight"); plt.close(fig)
-        print(f"\nDone — tornado figure saved: figs/{name}.png")
+        # Export alongside the figure so the report can rank the drivers without
+        # hand-copying numbers (same no-drift discipline as the other exports).
+        os.makedirs("output", exist_ok=True)
+        with open(f"output/{name}_results.json", "w") as fh:
+            json.dump(t, fh, indent=1)
+        print(f"\nDone — tornado figure saved: figs/{name}.png "
+              f"(+ output/{name}_results.json)")
         return
 
     # Single custom scenario

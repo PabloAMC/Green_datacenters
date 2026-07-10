@@ -53,6 +53,15 @@ eu-siting:        ## rank EU sites by cheapest 24/7 carbon-free power (sun+wind 
 eu-siting-fetch:  ## (re)fetch ERA5 for the EU-siting RE candidates; needs a CDS key
 	$(PYTHON) tools/build_eu_siting.py --fetch
 
+scan-offshore:    ## re-price the scan's part-sea cells at offshore wind costs (needs the scan JSON)
+	$(PYTHON) tools/scan_eu.py --offshore
+
+scan-robustness:  ## weather-year stability of the scan ranking (needs the grid npz)
+	$(PYTHON) tools/scan_robustness.py
+
+tornado:          ## EU parity-gap sensitivity tornado (figure + JSON export)
+	$(PYTHON) datacenter_lcoe.py --tornado --region eu
+
 solar-only:
 	$(PYTHON) tools/build_solar_only.py
 
