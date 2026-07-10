@@ -145,19 +145,19 @@ def tldr(us, eu):
                     f"European gas price (${eu['gas_pure'][0]:.0f})")
 
     items = [
-        f"<li><b>Running a datacenter mostly on renewables is already affordable.</b> "
+        f"<li><b>Most of an always-on datacenter's energy can come from renewables today.</b> "
         f"Solar, wind and batteries can supply 70–80% of an always-on datacenter's energy "
         f"for ~${eu70[0]:.0f}–{eu80[0]:.0f}/MWh in Europe and ~${us70[0]:.0f}–{us80[0]:.0f} "
         f"in the US today (gas: ${eu['gas_pure'][0]:.0f} / ${us['gas_pure'][0]:.0f}) — "
-        f"a real but modest premium, and in carbon-priced Europe the 70% build becomes the "
+        f"a premium over gas, and in carbon-priced Europe the 70% build becomes the "
         f"<i>cheaper</i> plant {_cross(eu70_py)}.</li>",
         f"<li><b>The expensive part is the last 10–30%.</b> Batteries bridge nights, not "
         f"dark windless weeks, so pushing Europe from 80% to 90% renewable adds "
         f"~${eu90[0] - eu80[0]:.0f}/MWh today. Going fully gas-free takes wind plus "
         f"hydrogen or pumped storage: ${h2[0]:.0f}/MWh in Europe now, falling to "
         f"${h2[-1]:.0f} and crossing below gas {_cross(h2_py)}.</li>",
-        f"<li><b>Where you build matters more than how green you aim.</b> {site_txt}; "
-        f"in the cheap-gas US, by contrast, no renewable target beats "
+        f"<li><b>Location changes the delivered cost more than the renewable target does.</b> {site_txt}; "
+        f"in the cheap-gas US, by contrast, no renewable target costs less than "
         f"${us['gas_pure'][0]:.0f} gas within the horizon (70–80% gets within a few "
         f"$/MWh).</li>",
     ]
@@ -183,11 +183,9 @@ def tldr(us, eu):
         f'twice as hard.</p>')
     return ('<div class="tldr"><h2>Three things to take away</h2><ol>'
             + "".join(items) + '</ol>' + scale +
-            '<p class="macro">None of this means sector emissions will fall: the AI '
-            'buildout is raising electricity demand faster than clean supply is being added, '
-            'and the big operators\' net-zero targets are slipping. What the model shows is '
-            'the choice each <i>new</i> datacenter controls — it can be built mostly clean '
-            'at a modest, and shrinking, premium.</p></div>')
+            '<p class="macro">The model covers only the choice each <i>new</i> datacenter '
+            'controls — how cleanly it can be built and at what premium — not sector-wide '
+            'electricity demand or emissions totals.</p></div>')
 
 
 def findings(us, eu):
@@ -216,8 +214,8 @@ def findings(us, eu):
 
     # EU siting ranking (tools/build_eu_siting.py export)
     es = _load_optional("eu_siting_results.json")
-    siting_txt = ("Firm hydro (Norway, Sweden, the Alps) and Iceland geothermal beat every "
-                  "build-it-yourself sun+wind site.")
+    siting_txt = ("Firm hydro (Norway, Sweden, the Alps) and Iceland geothermal have a lower "
+                  "delivered cost than every build-it-yourself sun+wind site.")
     phs_vs_h2 = ""
     if es:
         i = es["sites"][0]["years"].index(es["ranking_year"])
@@ -245,7 +243,7 @@ def findings(us, eu):
                          f"best build-it-yourself geography is windy coast, not sunny "
                          f"interior — mostly-land coastal cells from the Baltic to Galicia "
                          f"cluster at ~${landt[0]['lcoe']:.0f}–{landt[5]['lcoe']:.0f}/MWh, "
-                         f"while the flashier part-sea cells (~${top[0]['lcoe']:.0f} at "
+                         f"while the part-sea cells (~${top[0]['lcoe']:.0f} at "
                          f"onshore prices) really cost ~${offv[0]:.0f}+ once their sea "
                          f"wind is priced at offshore capex.")
         else:
@@ -274,7 +272,7 @@ def findings(us, eu):
 
     # (headline, one-sentence support, optional expandable detail)
     items = [
-        ("Europe: moderate renewable shares beat carbon-priced gas; the last decile is dear.",
+        ("Europe: moderate renewable shares cost less than carbon-priced gas; the last decile is a large premium.",
          f"A 70% renewable build crosses below gas {_cross(eu70)} and 80% {_cross(eu80)}, but "
          f"on France's measured weather 85% reaches parity only {_cross(eu85)} and 90% "
          f"{_cross(eu90)}.",
@@ -297,17 +295,17 @@ def findings(us, eu):
          f"adds ≈$25–30/MWh (a premium that narrows as EU carbon rises); self-produced H₂ — "
          f"an electrolyser plus tank storage, charged on surplus sun — is the cheaper "
          f"zero-carbon route. {phs_vs_h2}"),
-        ("Where to build in Europe: water first, then windy coasts and sunny islands.",
+        ("Cheapest clean sites in Europe: water first, then windy coasts and sunny islands.",
          siting_txt,
          "Firm hydro and geothermal sites skip the firming question entirely. Among "
-         "sun+wind sites, the winners are those whose resource co-locates with "
+         "sun+wind sites, the cheapest are those whose resource co-locates with "
          "pumped-storage terrain (islands and sierras); flat sites fall back on dearer "
          "H₂ firming." + scan_note + " Details in the Geography chapter."),
         ("Small modular nuclear: a glide-path reference, not today's competitor.",
          smr_support, smr_more),
-        ("The US is a different planet: cheap gas is the moat.",
+        ("In the US, cheap gas sets a baseline renewables do not cross within the horizon.",
          f"Even 70–80% renewable targets bottom out ≈$60/MWh vs the ${us['gas_pure'][0]:.0f} "
-         f"flat-gas baseline (crossover {_crossover(us, '0.70')}); they beat a stressed "
+         f"flat-gas baseline (crossover {_crossover(us, '0.70')}); they reach parity with a stressed "
          f"(+60% fuel) gas baseline by ~2030.",
          f"At $4/MMBtu, renewables compete with a ~$29/MWh <i>fuel</i> bill, not the "
          f"${us['gas_pure'][0]:.0f} all-in gas LCOE — so the pure cost-optimum is ≈0% "
@@ -371,17 +369,17 @@ def locations_section():
             'only the renewable <b>resource</b> differs — gas, carbon and technology costs '
             'are the region default — so this isolates how much <b>where you build</b>, '
             'and <b>whether you add a wind park</b>, move the cost.</p>'
-            '<h3>Is a wind park worth building? (gas-backed)</h3>'
+            '<h3>Does adding a wind park lower the cost? (gas-backed)</h3>'
             '<p>Solar is quick to permit; a wind park is a far bigger siting undertaking. '
-            'The test is fair: both builds are optimised to the <b>same renewable target</b> '
+            'Both builds are optimised to the <b>same renewable target</b> '
             'at each site — the most a solar + battery + gas system can reach <i>without</i> '
             'wind (~55–68%, shown in each panel) — and the <b style="color:#0072B2">wind '
             'build</b> may add a wind park <b>only if that lowers cost</b>. So the blue line '
             'is never above the <b style="color:#b07900">no-wind</b> orange line: it dips '
-            'below where wind genuinely competes (the United Kingdom; Texas, Iowa) and '
-            'merges with it where wind is too weak to bother (Arizona, California, Italy — '
+            'below where wind lowers the cost (the United Kingdom; Texas, Iowa) and '
+            'merges with it where wind is too weak to add (Arizona, California, Italy — '
             '~2% capacity factor <i>at the modelled point</i>, so the optimiser builds '
-            'almost none). A reading note before a low row surprises you: each location is '
+            'almost none). A reading note: each location is '
             'sampled at one representative point — usually its datacenter hub (Ashburn, '
             'Silicon Valley, Phoenix, Milan) — not the country\'s windiest terrain. '
             'Italy\'s 0.02 wind CF is real for Milan\'s becalmed Po Valley; Italy\'s '
@@ -437,7 +435,7 @@ def locations_section():
             'hydrogen</b> vs <b style="color:#0072B2">the same plus a wind park</b> — on the '
             f'same {yspan} weather. The gap between the lines is what the wind park buys '
             f'(2035): {top}; ~$0 where wind is scarce ({flat}), where the easier-to-permit '
-            'no-wind build is the one to pick. The <b style="color:#8e44ad">purple dash-dot '
+            'no-wind build is the cheaper one. The <b style="color:#8e44ad">purple dash-dot '
             'small modular reactor</b> is the other firm zero-carbon option — often '
             'competitive, especially in carbon-priced Europe. Grey dashed: the (emitting) '
             'gas baseline, for reference.</p>'
@@ -503,15 +501,15 @@ def siting_section():
     geo = [r["delivered"][j] for r in rows if r["resource"] == "geothermal"]
     geo_txt = f" and Icelandic <b>geothermal (~${geo[0]:.0f})</b>" if geo else ""
     return (
-        '<h1>Where in Europe should you build?</h1>'
+        '<h1>Where in Europe is clean power cheapest?</h1>'
         '<p>Candidate locations ranked by the cheapest <b>24/7 carbon-free</b> delivered '
         'power, each using its <b>best clean resource</b>: firm <b>geothermal</b> (Iceland) '
         'or big <b>hydro</b> (Norway, Sweden, the Alps, Greenland) where they exist; '
         'everywhere else a gas-free solar + wind + battery build, firmed by <b>green '
         f'hydrogen</b> or <b>pumped storage (PHS)</b>. ({yr}, firm · {src}.)</p>'
-        f'<p><b>Firm clean baseload wins decisively.</b> Nordic/Alpine <b>hydro '
-        f'(~${cheapest["delivered"][j]:.0f}/MWh)</b>{geo_txt} beat every '
-        'build-it-yourself sun-and-wind site and sit far below gas.</p>'
+        f'<p><b>Firm clean baseload has the lowest delivered cost.</b> Nordic/Alpine <b>hydro '
+        f'(~${cheapest["delivered"][j]:.0f}/MWh)</b>{geo_txt} cost less than every '
+        'build-it-yourself sun-and-wind site and sit below gas.</p>'
         '<p><b>Both firmings are shown for every sun+wind site</b>, because which one a '
         'site can use is itself geographic: off-river PHS needs terrain with head '
         '(availability from the <b>ANU Global Pumped Hydro Atlas</b>), while H₂ works '
@@ -521,13 +519,13 @@ def siting_section():
         'far less overbuild is wasted). Flat sites (Jutland, the Dover Strait) have no '
         'cheap PHS and fall back on dearer H₂; the open circle on each bar marks the '
         'firming <i>not</i> chosen.</p>'
-        '<p style="font-size:13.5px">Two caveats worth keeping. (1) <b>Wind and PHS terrain '
+        '<p style="font-size:13.5px">Two caveats. (1) <b>Wind and PHS terrain '
         'don\'t always co-locate:</b> Romania\'s wind is on the flat Black Sea coast while '
         'its PHS is inland in the Carpathians, so its site is H₂-firmed; Switzerland is '
-        'genuinely wind-poor even with world-class PHS — its real edge is conventional '
+        'wind-poor even with world-class PHS — its lowest-cost clean resource is conventional '
         'hydro. (2) <b>In carbon-priced Europe, partial-gas isn\'t the cheap option:</b> '
         '"75% RE + gas" undercuts fully-clean only at the flat H₂-firmed sites; where PHS '
-        'makes clean firming cheap, 100% zero-carbon wins.</p>'
+        'makes clean firming cheap, 100% zero-carbon is cheaper.</p>'
         # Two maps STACKED (one below the other), each full width.
         + _fig_box(map_h2, "EU siting map, green-hydrogen firming",
                    "If firmed by <b>green hydrogen</b> — works at every site (H₂ needs no terrain).")
@@ -614,22 +612,22 @@ def scan_section():
                        key=lambda c: c["lcoe"])
         s0 = south[0]
         verdict = (
-            f'<p><b>But sea wind must be bought at sea prices — and that changes the '
-            f'podium.</b> The raw winners above are only 20–40% land: their measured '
+            f'<p><b>Sea wind must be priced at offshore capex, which changes the '
+            f'ranking.</b> The raw top cells above are only 20–40% land: their measured '
             f'wind is North Sea/Baltic <i>sea</i> wind, and the map prices it at onshore '
             f'capex. Re-pricing every cell below {off["lsm_threshold"]:.0%} land at '
             f'European fixed-bottom <b>offshore</b> costs (${off["lcoe_today"]:.0f}/MWh '
             f'levelised at CF {off["ref_cf"]:.2f} — the UK AR7 clearing level — with '
             f'offshore\'s slower ~{off["learning_rate"]:.0%} learning) lifts the raw '
             f'top-10 from ~${ranked[0]["lcoe"]:.0f}–{ranked[9]["lcoe"]:.0f} to '
-            f'<b>~${off_vals[0]:.0f}–{off_vals[-1]:.0f}/MWh</b>. The honest '
+            f'<b>~${off_vals[0]:.0f}–{off_vals[-1]:.0f}/MWh</b>. The '
             f'build-it-yourself ranking is led instead by the cheapest <b>mostly-land</b> '
-            f'coastal cells at their legitimate onshore pricing ({land_txt}) — and the '
-            f'north–south drama largely evaporates: the best mostly-land southern cells '
+            f'coastal cells at their onshore pricing ({land_txt}) — and the '
+            f'north–south gap largely disappears: the cheapest mostly-land southern cells '
             f'({_cellname(s0)} — windy Galicia — at ${s0["lcoe"]:.0f}; '
             f'{_cellname(south[1])} at ${south[1]["lcoe"]:.0f}) sit within the scan\'s '
-            f'screening noise of the northern leaders. What survives every pricing: <b>coastal wind beats inland sun</b>, '
-            f'the sheltered continental interior is the place to avoid, and no DIY cell '
+            f'screening noise of the northern top cells. What survives every pricing: <b>coastal wind has a lower cost than inland sun</b>, '
+            f'the sheltered continental interior is the most expensive, and no DIY cell '
             f'approaches firm hydro (~$46) or the PHS-firmed southern sites above '
             f'($70–93). (Waters needing floating turbines — the Norwegian Trench — would '
             f'be ~2.4× dearer still; not modelled.)</p>')
@@ -642,33 +640,33 @@ def scan_section():
     return (
         '<h2>Scanning the whole continent</h2>'
         f'<p>The nine sun+wind candidates above were chosen by hand. To remove the '
-        f'guesswork, the same gas-free build (solar + wind + battery + self-made '
+        f'hand-selection, the same gas-free build (solar + wind + battery + self-made '
         f'hydrogen) was computed at <b>every ~1° land cell of Europe — {n} cells</b> — '
         f'on real hourly ERA5 weather ({yrs[0]}–{yrs[-1]}), with each cell\'s solar and '
         f'wind costs re-anchored to its real capacity factors. EU technology costs are '
         f'used everywhere, so the map isolates <b>geography</b>: resource quality and '
         f'weather structure, not national policy. Median cell: ~${med:.0f}/MWh at {mi}.</p>'
-        f'<p><b>The raw map says: wind, not sun.</b> The best cells on raw cell weather '
+        f'<p><b>The raw map is led by wind, not sun.</b> The best cells on raw cell weather '
         f'(~${ranked[0]["lcoe"]:.0f}–{ranked[9]["lcoe"]:.0f}/MWh) trace the North Sea and '
         f'Baltic coasts and islands — Danish and Pomeranian shores, the Estonian and '
         f'Swedish Baltic islands, Orkney and the Faroes — where a ~0.5 wind capacity '
-        f'factor out-earns Mediterranean sun. The expensive interior band — and the very '
+        f'factor costs less than Mediterranean sun. The expensive interior band — and the very '
         f'worst cells, the sheltered Scandinavian inland valleys '
         f'(~${max(c["lcoe"] for c in eu_cells):.0f}) — is what a datacenter pays for '
-        f'being far from wind. Firm hydro (~$46) still beats every cell on the map.</p>'
+        f'being far from wind. Firm hydro (~$46) still costs less than every cell on the map.</p>'
         + verdict
         + _fig_box(map_fig, "map of 24/7 carbon-free power cost across Europe", map_cap)
         + '<h3>Can two capacity factors predict the price?</h3>'
-        f'<p>Almost — and the gap is the interesting part. A transparent least-squares '
+        f'<p>Almost — and the gap is the informative part. A transparent least-squares '
         f'fit on <b>mean solar and wind capacity factor alone</b> predicts the dispatch '
         f'model\'s cost with <b>R² {r2c:.2f}</b> (typical error ~${maec:.0f}/MWh) on '
         f'held-out cells; adding simple <b>weather-structure</b> statistics (the depth of '
         f'the worst 5- and 14-day sun+wind drought, sun–wind correlation, winter-solar '
         f'share) improves it to <b>R² {r2f:.2f}</b> (~${maef:.0f}/MWh). Both the formula '
-        f'and its miss are the message: annual averages carry most of the signal, and '
+        f'and its miss are both informative: annual averages carry most of the signal, and '
         f'what they miss is exactly the multi-day <i>Dunkelflaute</i> a 24/7 datacenter '
         f'must ride through. The full coefficients are in '
-        f'<code>output/eu_scan_results.json</code> — check us.</p>'
+        f'<code>output/eu_scan_results.json</code>.</p>'
         + _fig_box(sur_fig, "surrogate validation scatter and coefficients")
         + '<h3>The cheapest cells found by the scan</h3>'
         + "<table><thead><tr><th>Cell</th><th>Solar CF</th><th>Wind CF</th>"
@@ -680,11 +678,11 @@ def scan_section():
         'curated point sites above are the precision layer).'
         + _scan_robustness_note() +
         ' Cells with a low land fraction average sea wind into their capacity factor — '
-        'the offshore-priced column is the honest cost for building that wind for real. '
+        'the offshore-priced column is the actual cost for building that wind for real. '
         'The scan covers '
         'only the build-it-yourself sun+wind strategy; firm hydro and geothermal (the '
-        'overall winners) are plant-specific and stay as the marked point sites. And a '
-        'cheap cell is not a permit: several winners overlap sensitive areas (the Wadden '
+        'overall lowest-cost options) are plant-specific and stay as the marked point sites. And a '
+        'cheap cell is not a permit: several of the cheapest cells overlap sensitive areas (the Wadden '
         'Sea coast is a protected World Heritage sea; Orkney and the Baltic islands '
         'carry major bird and marine designations) — before treating a cell as a real '
         'candidate, re-score its exact coordinates (<code>tools/fetch_era5.py</code> + '
@@ -706,17 +704,17 @@ def wind_section():
     wall = d["data"]["us"]["solo"]["max_re"]
     blocks = [
         '<h1>Going fully zero-carbon</h1>'
-        '<h2>Do you even need a wind park?</h2>'
+        '<h2>Does the build need a wind park?</h2>'
         '<p>Solar is modular and quick to permit; a wind park is a far bigger siting and '
         'permitting undertaking. Comparing solar + wind + battery against <b>solar + '
         f'battery only</b> (both firm, gas-backed, {yr}): <b>there is a hard wall</b>. The '
         f'no-wind system tops out near <b>~{wall:.0%} renewable</b> — nights <i>and</i> '
         'multi-day cloud always fall to gas, and a battery cannot shift energy across days '
         '— while adding wind reaches ~94%. Below the wall, dropping wind costs little in '
-        'the sunny US and a clearer premium in Europe. <b>Bottom line:</b> for a moderate '
-        'renewable target, solar + battery alone is a reasonable, much-easier-to-build '
-        'choice; high renewable fractions genuinely need wind (or long-duration storage / '
-        'hydrogen).</p>'
+        'the sunny US and a clearer premium in Europe. For a moderate '
+        'renewable target, solar + battery alone reaches the target without wind and is '
+        'much easier to build; high renewable fractions require wind (or long-duration '
+        'storage / hydrogen).</p>'
         + _fig_box(fig, "cost vs renewable fraction, with and without wind")]
 
     # ── Zero-carbon synthesis (solar+battery+H₂) ────────────────────────────────
@@ -791,15 +789,14 @@ def footprint_section(us, eu):
         f'the same datacenter on gas — and burns no fuel, uses no combustion water, and '
         f'needs no pipeline.</li>'
         '</ul>'
-        '<p>Two honest counterpoints. First, this is <i>real</i> land: siting must avoid '
+        '<p>Two counterpoints. First, this is <i>real</i> land: siting must avoid '
         'protected areas (Natura 2000 and national designations), and the scan map\'s '
         'cells are screening averages, not permits. Second, the cheapest clean option of '
         'all — reservoir hydro — carries the largest ecological footprint per site: the '
         'siting ranking prices hydro at full new-build cost at places where big '
-        'reservoirs <i>already exist</i> (Norway, Sweden, the Alps); a plan that needs '
-        'damming new wild rivers should be treated as environmentally, not just '
-        'economically, expensive. A green compute zone is a land-use choice, and an '
-        'honest case for it states the acreage up front rather than hiding it.</p>'
+        'reservoirs <i>already exist</i> (Norway, Sweden, the Alps); damming new wild '
+        'rivers carries an ecological cost not captured in the price. The land area is '
+        'reported per GW so it can be weighed explicitly.</p>'
         '<h3>And the water?</h3>'
         '<p>Water is often the first local objection, and it splits into two separate '
         'ledgers. The <b>power side</b> of this build is essentially water-free: solar, '
@@ -810,8 +807,8 @@ def footprint_section(us, eu):
         'generates. The <b>datacenter side</b> is a design choice, not a consequence of '
         'going off-grid: evaporative cooling drinks ~1–2 L per kWh of IT load, but dry '
         '(closed-loop) cooling cuts site water to near zero for a small efficiency '
-        'penalty — the right default at the sunny, dry sites the siting ranking favours '
-        '(Iberia, the islands), which is exactly where water is scarcest.</p>'
+        'penalty — a common choice at the sunny, dry sites the siting ranking ranks '
+        'highest (Iberia, the islands), where water is scarcest.</p>'
         '<h3>Zero-carbon means zero combustion — not zero footprint</h3>'
         '<p>The model\'s carbon accounting is combustion-scope: the gas-free build burns '
         'nothing, so it scores zero. Manufacturing its panels, turbines and batteries '
@@ -920,12 +917,12 @@ def tornado_section():
         f'<p>One-at-a-time swings of the key assumptions around the base case, measured as '
         f'the change in the <b>parity gap</b> (the {t["re_target"]:.0%}-renewable build\'s '
         f'delivered cost minus gas, at {t["target_year"]}; base '
-        f'{t["base"]:+.0f} $/MWh). The ranking is the message: <b>{rows[0][0]}</b> swings '
+        f'{t["base"]:+.0f} $/MWh). The ranking: <b>{rows[0][0]}</b> swings '
         f'the gap by ${sw(rows[0]):.0f}/MWh and <b>{rows[1][0]}</b> by '
-        f'${sw(rows[1]):.0f} — together they dwarf everything else — while the smallest '
+        f'${sw(rows[1]):.0f} — together they account for most of the range — while the smallest '
         f'levers ({rows[-1][0]}, ${sw(rows[-1]):.0f}; {rows[-2][0]}, '
         f'${sw(rows[-2]):.0f}) barely move it. In words: whether deep-renewable Europe '
-        f'beats gas hinges on <b>wind quality and the gas price</b>, not on battery costs '
+        f'reaches parity with gas hinges on <b>wind quality and the gas price</b>, not on battery costs '
         f'or financing.</p>'
         + _fig_box(fig, "tornado chart: parity-gap sensitivity to each assumption")
         + '<p class="sub" style="font-size:13px">Reduced-fidelity, one-at-a-time swings on '
@@ -1097,7 +1094,7 @@ def index_page(us, eu):
     return (
         '<p class="sub">A techno-economic model of the least-cost way to run an always-on, '
         'off-grid datacenter on (mostly) renewable power — solar, wind, batteries and a '
-        'backstop — and of when that beats burning gas, across Europe and the US, '
+        'backstop — and of when that costs less than burning gas, across Europe and the US, '
         '2025–2040.</p>'
         f'<p class="repo"><a href="{REPO_URL}">▶&nbsp; Source code &amp; full methodology '
         'on GitHub</a></p>'
@@ -1109,11 +1106,10 @@ def index_page(us, eu):
         'from the model\'s exports. Full assumptions, caveats and glossary: '
         '<a href="method.html">Method &amp; trust</a>.</div>'
         '<h2>The question</h2>'
-        '<p>AI datacenters use a lot of electricity, and the boom is — so far — pushing '
-        'power-sector emissions up, not down. This model asks the narrower question each '
-        '<i>builder</i> controls: if you pair a new datacenter with its own solar, wind '
-        'and batteries, how clean can it run, and what does that cost compared with just '
-        'burning gas?</p>'
+        '<p>AI datacenters use a large and growing amount of electricity. This model asks '
+        'the narrower question each <i>builder</i> controls: if you pair a new datacenter '
+        'with its own solar, wind and batteries, how clean can it run, and what does that '
+        'cost compared with just burning gas?</p>'
         '<p>The catch is that a datacenter needs power every hour and sun and wind don\'t '
         'deliver every hour. The bill therefore hinges on the <b>backstop</b> for dark, '
         'windless spells (a <i>Dunkelflaute</i>): a gas turbine, which emits, or a clean '
@@ -1149,7 +1145,7 @@ def index_page(us, eu):
         'is cheapest — a ranked siting map, a scan of every ~1° cell of the continent '
         'on real weather, and how 14 EU/US markets compare.</a>'
         '<a href="zero-carbon.html"><b>Zero-carbon</b><br>Dropping gas entirely: the '
-        'solar-only wall, what green hydrogen costs, and the honest land, water and '
+        'solar-only wall, what green hydrogen costs, and the land, water and '
         'embodied-carbon ledger per GW.</a>'
         '<a href="method.html"><b>Method &amp; trust</b><br>Assumptions, what is and '
         'isn\'t modelled, how far to trust the numbers, and a glossary.</a>'
@@ -1245,7 +1241,7 @@ def main():
             'the AI Office or the EU Commission.</div>')
     pages = {
         "index.html": ("Green datacenters — Overview",
-                       "How green can a datacenter be — and where should it go?",
+                       "How green can an off-grid datacenter be, and where is clean power cheapest?",
                        index_page(us, eu)),
         "geography.html": ("Green datacenters — Geography",
                            None, siting_section() + scan_section() + locations_section()),
